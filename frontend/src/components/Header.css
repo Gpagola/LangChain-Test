@@ -1,0 +1,124 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 58px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-logo {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
+.header-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.new-case-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid #1a4f9c;
+  background: #1a4f9c;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.new-case-btn:hover { opacity: 0.85; }
+
+.admin-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.admin-toggle:hover { background: var(--bg-hover); color: var(--text); }
+.admin-toggle.active { background: var(--bg-active); color: var(--text); border-color: var(--border-focus); }
+
+/* ── Theme switch ── */
+.theme-switch {
+  position: relative;
+  width: 68px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background 0.3s, border-color 0.3s;
+  flex-shrink: 0;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--btn-bg);
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  z-index: 2;
+}
+
+.theme-switch.dark  .switch-knob { left: 3px; }
+.theme-switch.light .switch-knob { left: 37px; }
+
+.switch-moon,
+.switch-sun {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.switch-moon { left: 6px; }
+.switch-sun  { right: 6px; }
+
+.theme-switch:hover { border-color: var(--border-focus); }

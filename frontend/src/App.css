@@ -1,0 +1,24 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #212121;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.resize-handle {
+  width: 4px;
+  background: var(--border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover {
+  background: var(--border-focus);
+}
