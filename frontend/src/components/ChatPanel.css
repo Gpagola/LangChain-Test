@@ -101,6 +101,7 @@
   border-radius: 18px 18px 4px 18px;
   color: var(--text);
   transition: background 0.2s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 .message-row.assistant .bubble {
@@ -109,6 +110,7 @@
   background: var(--bg-panel);
   border-radius: 18px 18px 18px 4px;
   border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 .bubble p { margin-bottom: 10px; }
@@ -163,6 +165,7 @@
   padding: 12px 12px 12px 16px;
   border: 1px solid var(--border);
   transition: border-color 0.2s, background 0.2s;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
 }
 
 .input-box:focus-within { border-color: var(--border-focus); }

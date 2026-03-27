@@ -4,9 +4,9 @@ import AdminPanel from "./components/AdminPanel"
 import ChatPanel from "./components/ChatPanel"
 import "./App.css"
 
-const MIN_WIDTH = 200
+const MIN_WIDTH = 380
 const MAX_WIDTH = 600
-const DEFAULT_WIDTH = 340
+const DEFAULT_WIDTH = 380
 
 export default function App() {
   const [adminOpen, setAdminOpen] = useState(true)
@@ -59,6 +59,7 @@ export default function App() {
     <div className="app">
       <Header
         adminOpen={adminOpen}
+        adminWidth={adminWidth}
         onToggleAdmin={() => setAdminOpen(o => !o)}
         onNewCase={handleReset}
         theme={theme}

@@ -8,7 +8,6 @@ import re
 import uuid
 import base64
 import json
-import psycopg
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -16,9 +15,8 @@ from dotenv import load_dotenv
 import pypdf
 from openai import OpenAI
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.postgres import PostgresSaver
 
-from chatbot import build_agent, DATABASE_URL, preload_ontologies, invalidate_ontology_cache
+from chatbot import build_agent, get_conn, MySQLSaver, preload_ontologies, invalidate_ontology_cache
 
 load_dotenv()
 
@@ -26,8 +24,6 @@ app = Flask(__name__)
 CORS(app)  # permite peticiones desde React (localhost:5173)
 
 # ── Estado global del agente ──────────────────────────────────────────────────
-# El checkpointer y el agente se inicializan una vez al arrancar el servidor.
-# Cada sesión se identifica por su thread_id (session_id).
 
 _checkpointer = None
 _agent = None
@@ -35,9 +31,7 @@ _agent = None
 def get_agent():
     global _checkpointer, _agent
     if _agent is None:
-        # Conexión persistente para el ciclo de vida del servidor Flask
-        conn = psycopg.connect(DATABASE_URL)
-        _checkpointer = PostgresSaver(conn)
+        _checkpointer = MySQLSaver()
         _checkpointer.setup()
         _agent = build_agent(_checkpointer)
         preload_ontologies()
@@ -47,7 +41,7 @@ def get_agent():
 # ── Generador de sugerencias rápidas ─────────────────────────────────────────
 
 def _generar_sugerencias(session_id: str) -> list:
-    """Genera 3-5 respuestas rápidas usando el historial de la sesión."""
+    """Genera 3-4 respuestas rápidas usando el historial de la sesión."""
     try:
         state = get_agent().get_state({"configurable": {"thread_id": session_id}})
         msgs = state.values.get("messages", [])
@@ -61,7 +55,7 @@ def _generar_sugerencias(session_id: str) -> list:
             elif m.type == "ai":
                 lines.append(f"Asistente: {m.content[:300]}")
 
-        # Necesitamos al menos 2 turnos completos (ejecutivo + asistente x2) para sugerir algo útil
+        # Necesitamos al menos 2 turnos del ejecutivo para tener contexto útil
         human_turns = sum(1 for l in lines if l.startswith("Ejecutivo:"))
         if not lines or human_turns < 2:
             return []
@@ -87,11 +81,9 @@ def _generar_sugerencias(session_id: str) -> list:
             temperature=0.2,
         )
         raw = response.choices[0].message.content.strip()
-        print(f"[Sugerencias] raw GPT response: {raw!r}")
-        # Strip markdown code fences if present (```json ... ``` or ``` ... ```)
+        print(f"[Sugerencias] raw: {raw!r}")
         raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
         result = json.loads(raw)
-        print(f"[Sugerencias] parsed: {result}")
         if isinstance(result, list):
             suggestions = [str(s).strip() for s in result[:5] if s]
         elif isinstance(result, dict):
@@ -125,13 +117,13 @@ def chat():
     Body: { "message": "...", "session_id": "..." }
     """
     data = request.get_json()
-    message = data.get("message", "").strip()
+    message    = data.get("message", "").strip()
     session_id = data.get("session_id", "")
 
     if not message or not session_id:
         return jsonify({"error": "message y session_id son requeridos"}), 400
 
-    agent = get_agent()
+    agent  = get_agent()
     config = {"configurable": {"thread_id": session_id}}
 
     def generate():
@@ -148,14 +140,6 @@ def chat():
                 ):
                     yield f"data: {json.dumps({'token': chunk.content})}\n\n"
 
-            # Post-proceso: generar sugerencias con el historial actualizado
-            suggestions = _generar_sugerencias(session_id)
-            print(f"[Chat] suggestions to send: {suggestions}")
-            if suggestions:
-                payload = json.dumps({'suggestions': suggestions})
-                print(f"[Chat] sending SSE: {payload}")
-                yield f"data: {payload}\n\n"
-
             yield "data: [DONE]\n\n"
         except Exception as e:
             print(f"ERROR en /api/chat: {e}")
@@ -170,6 +154,15 @@ def chat():
 
 # ── Endpoint de análisis de documentos ───────────────────────────────────────
 
+@app.route("/api/suggestions", methods=["GET"])
+def suggestions():
+    """Genera sugerencias de respuesta para la sesión actual (llamada asíncrona post-chat)."""
+    session_id = request.args.get("session_id", "")
+    if not session_id:
+        return jsonify([])
+    return jsonify(_generar_sugerencias(session_id))
+
+
 @app.route("/api/upload", methods=["POST"])
 def upload_document():
     """
@@ -179,29 +172,25 @@ def upload_document():
     if "file" not in request.files:
         return jsonify({"error": "No se recibió ningún archivo"}), 400
 
-    file = request.files["file"]
+    file     = request.files["file"]
     filename = file.filename.lower()
-    client = OpenAI()
+    client   = OpenAI()
 
     try:
-        # ── PDF ──────────────────────────────────────────────────────────────
         if filename.endswith(".pdf"):
             reader = pypdf.PdfReader(file)
-            texto = "\n".join(
+            texto  = "\n".join(
                 page.extract_text() or "" for page in reader.pages
             ).strip()
 
-            # Si el PDF tiene texto extraíble lo usamos directamente
             if len(texto) > 100:
                 analisis = _interpretar_con_vision(client, texto_plano=texto)
             else:
-                # PDF escaneado — convertir primera página a imagen via Vision
                 file.seek(0)
                 raw = file.read()
                 b64 = base64.b64encode(raw).decode()
                 analisis = _interpretar_con_vision(client, b64_pdf=b64)
 
-        # ── Imagen ───────────────────────────────────────────────────────────
         elif filename.endswith((".jpg", ".jpeg", ".png", ".webp")):
             raw = file.read()
             b64 = base64.b64encode(raw).decode()
@@ -220,7 +209,6 @@ def upload_document():
 
 def _interpretar_con_vision(client, texto_plano=None, b64_imagen=None, b64_pdf=None, mime="image/jpeg"):
     """Llama a GPT-4o para interpretar el documento y clasificarlo."""
-
     instruccion = """Eres un asistente de retención de clientes para una aseguradora.
 Analiza el documento adjunto e identifica:
 1. TIPO DE DOCUMENTO: ¿Es una póliza de seguro, una oferta de un competidor, una carta de queja, u otro?
@@ -259,15 +247,19 @@ Responde en español, de forma estructurada y concisa."""
 @app.route("/api/ontologias", methods=["GET"])
 def listar_ontologias():
     """Lista todos los registros activos de la tabla ontologias."""
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT nombre, version, contenido
-                FROM ontologias
-                WHERE activo = TRUE
-                ORDER BY id
-            """)
-            rows = cur.fetchall()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT nombre, version, contenido
+            FROM ontologias
+            WHERE activo = TRUE
+            ORDER BY id
+        """)
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        conn.close()
 
     return jsonify([
         {"nombre": r[0], "version": r[1], "contenido": r[2]}
@@ -281,20 +273,24 @@ def actualizar_ontologia(nombre):
     Actualiza el contenido de una ontología por nombre.
     Body: { "contenido": "..." }
     """
-    data = request.get_json()
+    data      = request.get_json()
     contenido = data.get("contenido", "").strip()
 
     if not contenido:
         return jsonify({"error": "contenido es requerido"}), 400
 
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE ontologias
-                SET contenido = %s
-                WHERE nombre = %s AND activo = TRUE
-            """, (contenido, nombre))
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE ontologias
+            SET contenido = %s
+            WHERE nombre = %s AND activo = TRUE
+        """, (contenido, nombre))
         conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
     invalidate_ontology_cache(nombre)
     return jsonify({"ok": True})

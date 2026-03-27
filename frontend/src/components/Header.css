@@ -4,16 +4,31 @@
   justify-content: space-between;
   padding: 0 28px;
   height: 76px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(270deg, #c850c0, #4158d0, #0093e9, #3a1c71, #c850c0);
+  background-size: 300% 300%;
+  animation: gradientShift 8s ease infinite;
+  border-bottom: none;
   flex-shrink: 0;
-  transition: background 0.2s, border-color 0.2s;
+}
+
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  background: #fff;
+  height: 100%;
+  padding-right: 24px;
+  margin-left: -28px;
+  padding-left: 28px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-width: 380px;
 }
 
 .header-logo {
@@ -25,8 +40,10 @@
 .header-title {
   font-size: 22px;
   font-weight: 700;
-  color: var(--text);
-  letter-spacing: 0.5px;
+  color: #000;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  font-family: 'Inter', sans-serif;
 }
 
 .header-divider {
@@ -55,6 +72,7 @@
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.2s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
 .new-case-btn:hover { opacity: 0.85; }
@@ -66,16 +84,17 @@
   height: 34px;
   padding: 0 14px;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
+  border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(240,240,240,0.85);
+  color: #444;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
-.admin-toggle:hover { background: var(--bg-hover); color: var(--text); }
-.admin-toggle.active { background: var(--bg-active); color: var(--text); border-color: var(--border-focus); }
+.admin-toggle:hover { background: rgba(220,220,220,0.95); }
+.admin-toggle.active { background: rgba(240,240,240,0.85); color: #444; border-color: rgba(255,255,255,0.4); }
 
 /* ── Theme switch ── */
 .theme-switch {
@@ -88,6 +107,7 @@
   cursor: pointer;
   transition: background 0.3s, border-color 0.3s;
   flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
 .switch-knob {

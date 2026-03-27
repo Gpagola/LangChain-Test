@@ -24,12 +24,12 @@ function MoonIcon() {
   )
 }
 
-export default function Header({ adminOpen, onToggleAdmin, onNewCase, theme, onToggleTheme }) {
+export default function Header({ adminOpen, adminWidth, onToggleAdmin, onNewCase, theme, onToggleTheme }) {
   const isDark = theme === "dark"
 
   return (
     <header className="header">
-      <div className="header-left">
+      <div className="header-left" style={adminOpen ? { width: adminWidth } : {}}>
         <img
           src="/logos/logo.jpg"
           alt="Logo"
@@ -50,13 +50,14 @@ export default function Header({ adminOpen, onToggleAdmin, onNewCase, theme, onT
         <button
           className={`admin-toggle ${adminOpen ? "active" : ""}`}
           onClick={onToggleAdmin}
-          title={adminOpen ? "Ocultar panel admin" : "Mostrar panel admin"}
+          title={adminOpen ? "Ocultar estrategia" : "Mostrar estrategia"}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 20h9"/>
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v0A2.5 2.5 0 0 1 14.5 2H15a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5h-1.5"/>
+            <path d="M14.5 22A2.5 2.5 0 0 1 12 19.5v0A2.5 2.5 0 0 1 9.5 22H9a5 5 0 0 1-5-5v-1a5 5 0 0 1 5-5h1.5"/>
+            <path d="M12 4.5v15"/>
           </svg>
-          <span>Admin</span>
+          <span>Estrategia</span>
         </button>
 
         {/* Switch luna/sol */}

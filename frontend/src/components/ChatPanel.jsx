@@ -62,7 +62,6 @@ export default function ChatPanel() {
           const parsed = JSON.parse(data)
           if (parsed.error) throw new Error(parsed.error)
           if (parsed.token) onToken(parsed.token)
-          if (parsed.suggestions) setSuggestions(parsed.suggestions)
         } catch (e) {
           if (e.message !== "SyntaxError") throw e
         }
@@ -173,6 +172,12 @@ export default function ChatPanel() {
         const found = extractPoliza(accumulated, text)
         if (found) setPoliza(found)
       }
+
+      // Pedir sugerencias en background sin bloquear el input
+      fetch(`${API}/suggestions?session_id=${sessionId}`)
+        .then(r => r.json())
+        .then(s => { if (Array.isArray(s) && s.length) setSuggestions(s) })
+        .catch(() => {})
     } catch (e) {
       if (e.name !== "AbortError")
         setMessages(prev => [...prev, { role: "assistant", content: `⚠️ Error: ${e.message}` }])

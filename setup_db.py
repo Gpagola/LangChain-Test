@@ -1,45 +1,52 @@
 """
-Script para crear las tablas y cargar datos mock en Supabase.
+Script para crear las tablas y cargar datos en MySQL.
 Ejecutar una sola vez: python setup_db.py
 """
 
 import os
-import psycopg
+import mysql.connector
 from dotenv import load_dotenv
 
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+
+DB_CONFIG = {
+    "host":     os.getenv("DB_HOST"),
+    "port":     int(os.getenv("DB_PORT", 3306)),
+    "database": os.getenv("DB_NAME"),
+    "user":     os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+}
 
 # ── Definición de tablas ─────────────────────────────────────────────────────
 
 CREATE_POLIZAS = """
 CREATE TABLE IF NOT EXISTS polizas (
-    numero_poliza   VARCHAR(20) PRIMARY KEY,
-    ramo            VARCHAR(50) NOT NULL,
-    fecha_alta      DATE        NOT NULL,
-    rentabilidad    VARCHAR(10) NOT NULL  -- alta / media / baja
+    numero_poliza VARCHAR(20)  PRIMARY KEY,
+    ramo          VARCHAR(50)  NOT NULL,
+    fecha_alta    DATE         NOT NULL,
+    rentabilidad  VARCHAR(10)  NOT NULL
 );
 """
 
 CREATE_ONTOLOGIAS = """
 CREATE TABLE IF NOT EXISTS ontologias (
-    id          SERIAL PRIMARY KEY,
-    nombre      VARCHAR(100) NOT NULL,
-    version     VARCHAR(10)  NOT NULL DEFAULT '1.0',
-    contenido   TEXT         NOT NULL,
-    activo      BOOLEAN      NOT NULL DEFAULT TRUE,
-    UNIQUE (nombre, version)
+    id        INT AUTO_INCREMENT PRIMARY KEY,
+    nombre    VARCHAR(100) NOT NULL,
+    version   VARCHAR(10)  NOT NULL DEFAULT '1.0',
+    contenido LONGTEXT     NOT NULL,
+    activo    TINYINT(1)   NOT NULL DEFAULT 1,
+    UNIQUE KEY uq_nombre_version (nombre, version)
 );
 """
 
 # ── Datos mock: pólizas ──────────────────────────────────────────────────────
 
 POLIZAS_MOCK = [
-    ("POL-001", "Vida",   "2019-03-15", "alta"),
-    ("POL-002", "Auto",   "2022-07-01", "media"),
-    ("POL-003", "Hogar",  "2021-11-20", "baja"),
-    ("POL-004", "Salud",  "2020-05-10", "alta"),
-    ("POL-005", "Auto",   "2023-01-08", "media"),
+    ("POL-001", "Vida",  "2019-03-15", "alta"),
+    ("POL-002", "Auto",  "2022-07-01", "media"),
+    ("POL-003", "Hogar", "2021-11-20", "baja"),
+    ("POL-004", "Salud", "2020-05-10", "alta"),
+    ("POL-005", "Auto",  "2023-01-08", "media"),
 ]
 
 # ── Datos mock: ontología de reglas ──────────────────────────────────────────
@@ -294,71 +301,48 @@ seguido del análisis completo del documento realizado por un sistema externo. E
 # ── Ejecución ────────────────────────────────────────────────────────────────
 
 def setup():
-    print("Conectando a Supabase...")
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as cur:
+    print("Conectando a MySQL...")
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cur  = conn.cursor()
 
-            # Crear tablas
-            print("Creando tabla polizas...")
-            cur.execute(CREATE_POLIZAS)
+    print("Creando tabla polizas...")
+    cur.execute(CREATE_POLIZAS)
 
-            print("Creando tabla ontologias...")
-            cur.execute(CREATE_ONTOLOGIAS)
+    print("Creando tabla ontologias...")
+    cur.execute(CREATE_ONTOLOGIAS)
 
-            # Insertar pólizas mock (ignorar si ya existen)
-            print("Insertando pólizas mock...")
-            for pol in POLIZAS_MOCK:
-                cur.execute("""
-                    INSERT INTO polizas (numero_poliza, ramo, fecha_alta, rentabilidad)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (numero_poliza) DO NOTHING
-                """, pol)
+    print("Insertando pólizas mock...")
+    for pol in POLIZAS_MOCK:
+        cur.execute("""
+            INSERT IGNORE INTO polizas (numero_poliza, ramo, fecha_alta, rentabilidad)
+            VALUES (%s, %s, %s, %s)
+        """, pol)
 
-            # Asegurar que el constraint UNIQUE exista (por si la tabla ya fue creada sin él)
-            cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                        WHERE conname = 'ontologias_nombre_version_key'
-                    ) THEN
-                        ALTER TABLE ontologias ADD CONSTRAINT ontologias_nombre_version_key UNIQUE (nombre, version);
-                    END IF;
-                END$$;
-            """)
+    print("Insertando/actualizando ontologia-reglas...")
+    cur.execute("""
+        INSERT INTO ontologias (nombre, version, contenido, activo)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE contenido = VALUES(contenido), activo = VALUES(activo)
+    """, ("ontologia-reglas", "1.0", ONTOLOGIA_REGLAS, 1))
 
-            # Insertar o actualizar ontología de reglas
-            print("Insertando/actualizando ontologia-reglas...")
-            cur.execute("""
-                INSERT INTO ontologias (nombre, version, contenido, activo)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (nombre, version) DO UPDATE
-                    SET contenido = EXCLUDED.contenido,
-                        activo    = EXCLUDED.activo
-            """, ("ontologia-reglas", "1.0", ONTOLOGIA_REGLAS, True))
+    print("Insertando/actualizando ontologia-diferenciadores...")
+    cur.execute("""
+        INSERT INTO ontologias (nombre, version, contenido, activo)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE contenido = VALUES(contenido), activo = VALUES(activo)
+    """, ("ontologia-diferenciadores", "1.0", ONTOLOGIA_DIFERENCIADORES, 1))
 
-            # Insertar o actualizar ontología de diferenciadores
-            print("Insertando/actualizando ontologia-diferenciadores...")
-            cur.execute("""
-                INSERT INTO ontologias (nombre, version, contenido, activo)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (nombre, version) DO UPDATE
-                    SET contenido = EXCLUDED.contenido,
-                        activo    = EXCLUDED.activo
-            """, ("ontologia-diferenciadores", "1.0", ONTOLOGIA_DIFERENCIADORES, True))
+    print("Insertando/actualizando system-prompt...")
+    cur.execute("""
+        INSERT INTO ontologias (nombre, version, contenido, activo)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE contenido = VALUES(contenido), activo = VALUES(activo)
+    """, ("system-prompt", "1.0", SYSTEM_PROMPT, 1))
 
-            # Insertar o actualizar system prompt
-            print("Insertando/actualizando system-prompt...")
-            cur.execute("""
-                INSERT INTO ontologias (nombre, version, contenido, activo)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (nombre, version) DO UPDATE
-                    SET contenido = EXCLUDED.contenido,
-                        activo    = EXCLUDED.activo
-            """, ("system-prompt", "1.0", SYSTEM_PROMPT, True))
-
-        conn.commit()
-    print("✓ Setup completado.")
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Setup completado.")
 
 if __name__ == "__main__":
     setup()

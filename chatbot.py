@@ -2,7 +2,10 @@
 
 import argparse
 import os
-from psycopg_pool import ConnectionPool
+import pickle
+from typing import Any, Iterator, Optional, Sequence, Tuple
+
+import mysql.connector
 from dotenv import load_dotenv
 
 # [LANGCHAIN] Modelo de lenguaje
@@ -13,6 +16,7 @@ from langchain_core.tools import tool
 
 # [LANGCHAIN] SystemMessage para inyectar el system prompt en cada llamada
 from langchain_core.messages import SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 # [LANGGRAPH] Componentes para construir el grafo ReAct manualmente
 from langgraph.graph import StateGraph, MessagesState, START, END
@@ -20,23 +24,278 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 # [LANGGRAPH] ToolNode ejecuta las tools que el LLM decide invocar
 from langgraph.prebuilt import ToolNode
 
-# [LANGGRAPH] Checkpointer para persistencia en PostgreSQL
-from langgraph.checkpoint.postgres import PostgresSaver
+# [LANGGRAPH] Checkpoint base para implementación personalizada
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointTuple
 
 
 # ── Carga de variables de entorno ────────────────────────────────────────────
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+
+DB_CONFIG = {
+    "host":     os.getenv("DB_HOST"),
+    "port":     int(os.getenv("DB_PORT", 3306)),
+    "database": os.getenv("DB_NAME"),
+    "user":     os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+}
 
 
-# ── Connection Pool ───────────────────────────────────────────────────────────
-_pool: ConnectionPool | None = None
+# ── Conexión MySQL ────────────────────────────────────────────────────────────
 
-def get_pool() -> ConnectionPool:
-    global _pool
-    if _pool is None:
-        _pool = ConnectionPool(DATABASE_URL, min_size=2, max_size=5, open=True)
-    return _pool
+def get_conn():
+    """Crea y devuelve una nueva conexión MySQL."""
+    return mysql.connector.connect(**DB_CONFIG)
+
+# Alias para compatibilidad con backend.py
+def get_pool():
+    return None
+
+
+# ── MySQLSaver (checkpointer personalizado para LangGraph) ───────────────────
+
+class MySQLSaver(BaseCheckpointSaver):
+    """Checkpointer de LangGraph con persistencia propia en MySQL."""
+
+    def __init__(self):
+        super().__init__()
+
+    def setup(self):
+        """Crea las tablas de checkpoints si no existen."""
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS checkpoints (
+                    thread_id            VARCHAR(100) NOT NULL,
+                    checkpoint_ns        VARCHAR(100) NOT NULL DEFAULT '',
+                    checkpoint_id        VARCHAR(100) NOT NULL,
+                    parent_checkpoint_id VARCHAR(100),
+                    checkpoint_data      LONGBLOB     NOT NULL,
+                    metadata_data        LONGBLOB     NOT NULL,
+                    created_at           TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS checkpoint_writes (
+                    thread_id      VARCHAR(100) NOT NULL,
+                    checkpoint_ns  VARCHAR(100) NOT NULL DEFAULT '',
+                    checkpoint_id  VARCHAR(100) NOT NULL,
+                    task_id        VARCHAR(100) NOT NULL,
+                    idx            INTEGER      NOT NULL,
+                    channel        VARCHAR(100) NOT NULL,
+                    write_data     LONGBLOB     NOT NULL,
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+                )
+            """)
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _serialize(obj) -> bytes:
+        return pickle.dumps(obj)
+
+    @staticmethod
+    def _deserialize(data: bytes):
+        return pickle.loads(bytes(data))
+
+    def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
+        thread_id     = config["configurable"]["thread_id"]
+        checkpoint_id = config["configurable"].get("checkpoint_id")
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            if checkpoint_id:
+                cur.execute("""
+                    SELECT checkpoint_id, parent_checkpoint_id, checkpoint_data, metadata_data
+                    FROM checkpoints
+                    WHERE thread_id = %s AND checkpoint_ns = %s AND checkpoint_id = %s
+                """, (thread_id, checkpoint_ns, checkpoint_id))
+            else:
+                cur.execute("""
+                    SELECT checkpoint_id, parent_checkpoint_id, checkpoint_data, metadata_data
+                    FROM checkpoints
+                    WHERE thread_id = %s AND checkpoint_ns = %s
+                    ORDER BY checkpoint_id DESC LIMIT 1
+                """, (thread_id, checkpoint_ns))
+
+            row = cur.fetchone()
+            if not row:
+                cur.close()
+                return None
+
+            cp_id, parent_cp_id, cp_data, meta_data = row
+            checkpoint = self._deserialize(cp_data)
+            metadata   = self._deserialize(meta_data)
+
+            cur.execute("""
+                SELECT task_id, channel, write_data FROM checkpoint_writes
+                WHERE thread_id = %s AND checkpoint_ns = %s AND checkpoint_id = %s
+                ORDER BY idx
+            """, (thread_id, checkpoint_ns, cp_id))
+
+            pending_writes = [
+                (task_id, channel, self._deserialize(blob))
+                for task_id, channel, blob in cur.fetchall()
+            ]
+            cur.close()
+        finally:
+            conn.close()
+
+        config_out = {
+            "configurable": {
+                "thread_id":     thread_id,
+                "checkpoint_ns": checkpoint_ns,
+                "checkpoint_id": cp_id,
+            }
+        }
+        parent_config = (
+            {
+                "configurable": {
+                    "thread_id":     thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "checkpoint_id": parent_cp_id,
+                }
+            }
+            if parent_cp_id else None
+        )
+        return CheckpointTuple(
+            config=config_out,
+            checkpoint=checkpoint,
+            metadata=metadata,
+            parent_config=parent_config,
+            pending_writes=pending_writes,
+        )
+
+    def list(
+        self,
+        config: Optional[RunnableConfig],
+        *,
+        filter: Optional[dict] = None,
+        before: Optional[RunnableConfig] = None,
+        limit: Optional[int] = None,
+    ) -> Iterator[CheckpointTuple]:
+        if not config:
+            return
+        thread_id     = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            query = """
+                SELECT checkpoint_id, parent_checkpoint_id, checkpoint_data, metadata_data
+                FROM checkpoints
+                WHERE thread_id = %s AND checkpoint_ns = %s
+                ORDER BY checkpoint_id DESC
+            """
+            params: list = [thread_id, checkpoint_ns]
+            if limit:
+                query += " LIMIT %s"
+                params.append(limit)
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            cur.close()
+        finally:
+            conn.close()
+
+        for cp_id, parent_cp_id, cp_data, meta_data in rows:
+            checkpoint = self._deserialize(cp_data)
+            metadata   = self._deserialize(meta_data)
+            config_out = {
+                "configurable": {
+                    "thread_id":     thread_id,
+                    "checkpoint_ns": checkpoint_ns,
+                    "checkpoint_id": cp_id,
+                }
+            }
+            parent_config = (
+                {
+                    "configurable": {
+                        "thread_id":     thread_id,
+                        "checkpoint_ns": checkpoint_ns,
+                        "checkpoint_id": parent_cp_id,
+                    }
+                }
+                if parent_cp_id else None
+            )
+            yield CheckpointTuple(
+                config=config_out,
+                checkpoint=checkpoint,
+                metadata=metadata,
+                parent_config=parent_config,
+            )
+
+    def put(
+        self,
+        config: RunnableConfig,
+        checkpoint: dict,
+        metadata: dict,
+        new_versions: Any,
+    ) -> RunnableConfig:
+        thread_id            = config["configurable"]["thread_id"]
+        checkpoint_ns        = config["configurable"].get("checkpoint_ns", "")
+        checkpoint_id        = checkpoint["id"]
+        parent_checkpoint_id = config["configurable"].get("checkpoint_id")
+
+        cp_data   = self._serialize(checkpoint)
+        meta_data = self._serialize(metadata)
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO checkpoints
+                    (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
+                     checkpoint_data, metadata_data)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    checkpoint_data = VALUES(checkpoint_data),
+                    metadata_data   = VALUES(metadata_data)
+            """, (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
+                  cp_data, meta_data))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+
+        return {
+            "configurable": {
+                "thread_id":     thread_id,
+                "checkpoint_ns": checkpoint_ns,
+                "checkpoint_id": checkpoint_id,
+            }
+        }
+
+    def put_writes(
+        self,
+        config: RunnableConfig,
+        writes: Sequence[Tuple[str, Any]],
+        task_id: str,
+    ) -> None:
+        thread_id     = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
+        checkpoint_id = config["configurable"]["checkpoint_id"]
+
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            for idx, (channel, value) in enumerate(writes):
+                blob = self._serialize(value)
+                cur.execute("""
+                    INSERT INTO checkpoint_writes
+                        (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, write_data)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE write_data = VALUES(write_data)
+                """, (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, blob))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
 
 
 # ── Ontology Cache ────────────────────────────────────────────────────────────
@@ -45,17 +304,21 @@ _ontology_cache: dict = {}
 def preload_ontologies():
     """Carga ontologías estáticas en memoria al arrancar para evitar consultas repetidas."""
     names = ["ontologia-reglas", "ontologia-diferenciadores"]
-    with get_pool().connection() as conn:
-        with conn.cursor() as cur:
-            for name in names:
-                cur.execute("""
-                    SELECT contenido FROM ontologias
-                    WHERE nombre = %s AND activo = TRUE
-                    ORDER BY version DESC LIMIT 1
-                """, (name,))
-                row = cur.fetchone()
-                if row:
-                    _ontology_cache[name] = row[0]
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        for name in names:
+            cur.execute("""
+                SELECT contenido FROM ontologias
+                WHERE nombre = %s AND activo = TRUE
+                ORDER BY version DESC LIMIT 1
+            """, (name,))
+            row = cur.fetchone()
+            if row:
+                _ontology_cache[name] = row[0]
+        cur.close()
+    finally:
+        conn.close()
 
 def invalidate_ontology_cache(nombre: str = None):
     """Invalida el cache tras actualizar una ontología desde el admin."""
@@ -66,21 +329,22 @@ def invalidate_ontology_cache(nombre: str = None):
 
 
 # ── Carga del System Prompt desde la BD ───────────────────────────────────────
-# El prompt ya no vive en el código — se almacena en la tabla ontologias
-# bajo el nombre "system-prompt". Así puede editarse desde un frontend
-# sin tocar código, y cada versión queda guardada.
 
 def cargar_system_prompt() -> str:
     """Carga la versión activa del system prompt desde la tabla ontologias."""
-    with get_pool().connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT contenido FROM ontologias
-                WHERE nombre = 'system-prompt' AND activo = TRUE
-                ORDER BY version DESC
-                LIMIT 1
-            """)
-            row = cur.fetchone()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT contenido FROM ontologias
+            WHERE nombre = 'system-prompt' AND activo = TRUE
+            ORDER BY version DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
     if not row:
         raise RuntimeError("No se encontró 'system-prompt' activo en la base de datos. Ejecuta setup_db.py.")
     return row[0]
@@ -88,22 +352,23 @@ def cargar_system_prompt() -> str:
 
 # ── Tools (herramientas del agente) ───────────────────────────────────────────
 
-# [LANGCHAIN] @tool convierte la función en una herramienta que el LLM puede decidir invocar.
-# El docstring es fundamental: el agente lo lee para saber cuándo y cómo usar la tool.
-
 @tool
 def buscar_poliza(numero_poliza: str) -> str:
     """Busca los datos de una póliza por su número.
     Retorna ramo, fecha de alta, antigüedad y rentabilidad.
     Usar cuando el ejecutivo proporcione el número de póliza del cliente."""
-    with get_pool().connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT numero_poliza, ramo, fecha_alta, rentabilidad
-                FROM polizas
-                WHERE numero_poliza = %s
-            """, (numero_poliza.upper().strip(),))
-            row = cur.fetchone()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT numero_poliza, ramo, fecha_alta, rentabilidad
+            FROM polizas
+            WHERE numero_poliza = %s
+        """, (numero_poliza.upper().strip(),))
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
 
     if not row:
         return f"No se encontró ninguna póliza con el número '{numero_poliza}'."
@@ -130,19 +395,22 @@ def ontologia_reglas(nombre: str = "ontologia-reglas") -> str:
     if nombre in _ontology_cache:
         return _ontology_cache[nombre]
 
-    with get_pool().connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT contenido FROM ontologias
-                WHERE nombre = %s AND activo = TRUE
-                ORDER BY version DESC
-                LIMIT 1
-            """, (nombre,))
-            row = cur.fetchone()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT contenido FROM ontologias
+            WHERE nombre = %s AND activo = TRUE
+            ORDER BY version DESC
+            LIMIT 1
+        """, (nombre,))
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
 
     if not row:
         return f"No se encontró la ontología '{nombre}'."
-
     return row[0]
 
 
@@ -155,31 +423,23 @@ def ontologia_diferenciadores() -> str:
     if cache_key in _ontology_cache:
         return _ontology_cache[cache_key]
 
-    with get_pool().connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT contenido FROM ontologias
-                WHERE nombre = 'ontologia-diferenciadores' AND activo = TRUE
-                ORDER BY version DESC
-                LIMIT 1
-            """)
-            row = cur.fetchone()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT contenido FROM ontologias
+            WHERE nombre = 'ontologia-diferenciadores' AND activo = TRUE
+            ORDER BY version DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
 
     if not row:
         return "No se encontró la ontología de diferenciadores. Contacta al administrador."
-
     return row[0]
-
-
-@tool
-def sugerir_respuestas(opciones: list) -> str:
-    """Muestra botones de respuesta rápida al ejecutivo en la interfaz de chat.
-    Llamar SIEMPRE al final de cada respuesta con 2-5 opciones cortas relevantes al contexto.
-    Considera: motivo de baja, ramo, competidor mencionado, argumentos ya presentados.
-    Usa los nombres de competidores reales cuando corresponda: Sura, Reale, Mutua Madrileña.
-    opciones: lista de strings cortos, máximo 5 palabras cada uno.
-    Ejemplo: ["Sí, acepta", "Lo rechaza", "El precio es alto", "Menciona Sura"]"""
-    return "[BOTONES: " + " | ".join(str(o).strip() for o in opciones[:5]) + "]"
 
 
 @tool
@@ -197,73 +457,60 @@ def build_agent(checkpointer):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
     tools = [buscar_poliza, ontologia_reglas, ontologia_diferenciadores, analizar_documento]
 
-    # Carga el system prompt desde la BD al iniciar el agente
     system_prompt = cargar_system_prompt()
-
-    # [LANGCHAIN] Vincula las tools al LLM para que pueda decidir cuándo invocarlas
     llm_with_tools = llm.bind_tools(tools)
 
-    # [LANGGRAPH] Nodo "agente": razona y decide si responder o llamar una tool
     def agent_node(state: MessagesState):
-        # Inyectamos el SystemMessage al inicio en cada llamada
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
         response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
 
-    # [LANGGRAPH] Decide si seguir llamando tools o terminar
     def should_continue(state: MessagesState):
         last = state["messages"][-1]
-        # Si el LLM pidió ejecutar tools → ir al nodo "tools"
-        # Si no hay tool_calls → la respuesta está lista, terminar
         return "tools" if last.tool_calls else END
 
-    # [LANGGRAPH] Construye el grafo ReAct: agent → tools → agent → ... → END
     builder = StateGraph(MessagesState)
     builder.add_node("agent", agent_node)
-    builder.add_node("tools", ToolNode(tools))  # ejecuta las tools automáticamente
+    builder.add_node("tools", ToolNode(tools))
     builder.add_edge(START, "agent")
     builder.add_conditional_edges("agent", should_continue)
-    builder.add_edge("tools", "agent")           # tras ejecutar tools, vuelve al agente
+    builder.add_edge("tools", "agent")
 
-    # [LANGGRAPH] compile() con checkpointer activa la persistencia en PostgreSQL
     return builder.compile(checkpointer=checkpointer)
 
 
 # ── Función principal ─────────────────────────────────────────────────────────
 
 def run_agent(session_id: str):
-    with PostgresSaver.from_conn_string(DATABASE_URL) as checkpointer:
-        checkpointer.setup()
-        agent = build_agent(checkpointer)
+    checkpointer = MySQLSaver()
+    checkpointer.setup()
+    agent = build_agent(checkpointer)
 
-        # [LANGGRAPH] thread_id identifica la sesión — permite retomar conversaciones
-        config = {"configurable": {"thread_id": session_id}}
+    config = {"configurable": {"thread_id": session_id}}
 
-        print(f"\n Asistente de Retención — sesión: '{session_id}'")
-        print("Escribe 'salir' para terminar.\n")
+    print(f"\n Asistente de Retención — sesión: '{session_id}'")
+    print("Escribe 'salir' para terminar.\n")
 
-        # Primer mensaje automático para arrancar el flujo
-        from langchain_core.messages import HumanMessage
+    from langchain_core.messages import HumanMessage
+    result = agent.invoke(
+        {"messages": [HumanMessage(content="Hola, necesito ayuda con un cliente.")]},
+        config=config
+    )
+    print(f"Asistente: {result['messages'][-1].content}\n")
+
+    while True:
+        user_input = input("Ejecutivo: ").strip()
+        if not user_input:
+            continue
+        if user_input.lower() in ("salir", "exit", "quit"):
+            print("Sesión cerrada.")
+            break
+
         result = agent.invoke(
-            {"messages": [HumanMessage(content="Hola, necesito ayuda con un cliente.")]},
+            {"messages": [HumanMessage(content=user_input)]},
             config=config
         )
-        print(f"Asistente: {result['messages'][-1].content}\n")
-
-        while True:
-            user_input = input("Ejecutivo: ").strip()
-
-            if not user_input:
-                continue
-            if user_input.lower() in ("salir", "exit", "quit"):
-                print("Sesión cerrada.")
-                break
-
-            result = agent.invoke(
-                {"messages": [HumanMessage(content=user_input)]},
-                config=config
-            )
-            print(f"\nAsistente: {result['messages'][-1].content}\n")
+        print(f"\nAsistente: {result['messages'][-1].content}\n")
 
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
