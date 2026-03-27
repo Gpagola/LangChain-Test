@@ -13,6 +13,7 @@ export default function App() {
   const [adminWidth, setAdminWidth] = useState(DEFAULT_WIDTH)
   const [resetKey, setResetKey] = useState(0)
   const [theme, setTheme] = useState("light")
+  const [chatLoading, setChatLoading] = useState(false)
   const dragging = useRef(false)
   const startX = useRef(0)
   const startWidth = useRef(0)
@@ -64,6 +65,7 @@ export default function App() {
         onNewCase={handleReset}
         theme={theme}
         onToggleTheme={toggleTheme}
+        loading={chatLoading}
       />
       <div className="app-body">
         {adminOpen && (
@@ -72,7 +74,7 @@ export default function App() {
             <div className="resize-handle" onMouseDown={onMouseDown} />
           </>
         )}
-        <ChatPanel key={resetKey} />
+        <ChatPanel key={resetKey} onLoadingChange={setChatLoading} />
       </div>
     </div>
   )

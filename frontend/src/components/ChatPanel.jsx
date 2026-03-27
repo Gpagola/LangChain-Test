@@ -21,7 +21,7 @@ function extractPoliza(responseText, userText) {
   return { numero, ramo, antiguedad, rentabilidad }
 }
 
-export default function ChatPanel() {
+export default function ChatPanel({ onLoadingChange }) {
   const [sessionId, setSessionId]   = useState(null)
   const [messages, setMessages]     = useState([])
   const [input, setInput]           = useState("")
@@ -30,12 +30,13 @@ export default function ChatPanel() {
   const [attachedFile, setAttachedFile] = useState(null)
   const [isStreaming, setIsStreaming]   = useState(false)
   const [suggestions, setSuggestions]   = useState([])
+  const [agentStatus, setAgentStatus]   = useState("")
   const bottomRef  = useRef(null)
   const textareaRef = useRef(null)
   const abortRef   = useRef(null)
   const fileInputRef = useRef(null)
 
-  async function streamChat(message, sessionId, controller, onToken) {
+  async function streamChat(message, sessionId, controller, onToken, onStatus) {
     const res = await fetch(`${API}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -61,7 +62,8 @@ export default function ChatPanel() {
         try {
           const parsed = JSON.parse(data)
           if (parsed.error) throw new Error(parsed.error)
-          if (parsed.token) onToken(parsed.token)
+          if (parsed.status) onStatus?.(parsed.status)
+          if (parsed.token) { onStatus?.(""); onToken(parsed.token) }
         } catch (e) {
           if (e.message !== "SyntaxError") throw e
         }
@@ -75,7 +77,7 @@ export default function ChatPanel() {
       const { session_id } = await r.json()
       setSessionId(session_id)
 
-      setLoading(true)
+      setLoading(true); onLoadingChange?.(true)
       const controller = new AbortController()
       abortRef.current = controller
       try {
@@ -90,13 +92,14 @@ export default function ChatPanel() {
           } else {
             setMessages([{ role: "assistant", content: accumulated }])
           }
-        })
+        }, setAgentStatus)
       } catch (e) {
         if (e.name !== "AbortError")
           setMessages([{ role: "assistant", content: `⚠️ Error al iniciar: ${e.message}` }])
       } finally {
-        setLoading(false)
+        setLoading(false); onLoadingChange?.(false)
         setIsStreaming(false)
+        setAgentStatus("")
         abortRef.current = null
       }
     }
@@ -125,7 +128,7 @@ export default function ChatPanel() {
       ? (text ? `📎 ${fileToSend.name}\n\n${text}` : `📎 ${fileToSend.name}`)
       : text
     setMessages(prev => [...prev, { role: "user", content: displayText }])
-    setLoading(true)
+    setLoading(true); onLoadingChange?.(true)
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -165,7 +168,7 @@ export default function ChatPanel() {
             return msgs
           })
         }
-      })
+      }, setAgentStatus)
 
       // Detectar si la respuesta contiene datos de póliza
       if (!poliza) {
@@ -174,7 +177,11 @@ export default function ChatPanel() {
       }
 
       // Pedir sugerencias en background sin bloquear el input
-      fetch(`${API}/suggestions?session_id=${sessionId}`)
+      fetch(`${API}/suggestions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_msg: text, assistant_msg: accumulated }),
+      })
         .then(r => r.json())
         .then(s => { if (Array.isArray(s) && s.length) setSuggestions(s) })
         .catch(() => {})
@@ -182,8 +189,9 @@ export default function ChatPanel() {
       if (e.name !== "AbortError")
         setMessages(prev => [...prev, { role: "assistant", content: `⚠️ Error: ${e.message}` }])
     } finally {
-      setLoading(false)
+      setLoading(false); onLoadingChange?.(false)
       setIsStreaming(false)
+      setAgentStatus("")
       abortRef.current = null
     }
   }
@@ -259,11 +267,12 @@ export default function ChatPanel() {
           </div>
         ))}
         {loading && !isStreaming && (
-          <div className="message-row assistant">
-            <div className="avatar">SR</div>
-            <div className="bubble typing">
-              <span /><span /><span />
-            </div>
+          <div className="agent-status-row">
+            <span className="pulse-dot" />
+            <span className="status-label">
+              {agentStatus || "Pensando"}
+              <span className="ellipsis-anim" />
+            </span>
           </div>
         )}
         <div ref={bottomRef} />

@@ -4,9 +4,9 @@
   justify-content: space-between;
   padding: 0 28px;
   height: 76px;
-  background: linear-gradient(270deg, #c850c0, #4158d0, #0093e9, #3a1c71, #c850c0);
-  background-size: 300% 300%;
-  animation: gradientShift 8s ease infinite;
+  background: linear-gradient(270deg, #c850c0, #4158d0, #0093e9, #f97316, #3a1c71, #c850c0);
+  background-size: 400% 400%;
+  animation: none;
   border-bottom: none;
   flex-shrink: 0;
 }
@@ -15,6 +15,10 @@
   0%   { background-position: 0% 50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
+}
+
+.header.animating {
+  animation: gradientShift 20s ease infinite;
 }
 
 .header-left {

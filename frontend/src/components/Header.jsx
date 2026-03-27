@@ -24,11 +24,11 @@ function MoonIcon() {
   )
 }
 
-export default function Header({ adminOpen, adminWidth, onToggleAdmin, onNewCase, theme, onToggleTheme }) {
+export default function Header({ adminOpen, adminWidth, onToggleAdmin, onNewCase, theme, onToggleTheme, loading }) {
   const isDark = theme === "dark"
 
   return (
-    <header className="header">
+    <header className={`header${loading ? " animating" : ""}`}>
       <div className="header-left" style={adminOpen ? { width: adminWidth } : {}}>
         <img
           src="/logos/logo.jpg"

@@ -40,6 +40,45 @@ def get_agent():
 
 # ── Generador de sugerencias rápidas ─────────────────────────────────────────
 
+def _generar_sugerencias_rapidas(user_msg: str, assistant_msg: str) -> list:
+    """Genera sugerencias rápidas a partir del último intercambio, sin acceder a la BD."""
+    try:
+        lines = []
+        if user_msg:
+            lines.append(f"Ejecutivo: {user_msg[:300]}")
+        lines.append(f"Asistente: {assistant_msg[:400]}")
+
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": (
+                "Último intercambio en una conversación de retención de seguros:\n"
+                + "\n".join(lines)
+                + "\n\nBasándote SOLO en esto, genera 3-4 frases MUY cortas (máximo 5 palabras) "
+                "que representen lo que el CLIENTE podría responder ahora. "
+                "Deben sonar como el cliente hablando. "
+                "Si no hay contexto suficiente, devuelve []. "
+                "No inventes competidores ni conceptos que no aparezcan arriba. "
+                'Responde SOLO con un JSON array de strings, sin markdown. '
+                'Ejemplo: ["Me parece bien", "El precio es alto", "Me lo pienso"]'
+            )}],
+            max_tokens=60,
+            temperature=0.2,
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        result = json.loads(raw)
+        if isinstance(result, list):
+            return [str(s).strip() for s in result[:4] if s]
+        if isinstance(result, dict):
+            for v in result.values():
+                if isinstance(v, list):
+                    return [str(s).strip() for s in v[:4] if s]
+    except Exception as e:
+        print(f"[Sugerencias] error: {e}")
+    return []
+
+
 def _generar_sugerencias(session_id: str) -> list:
     """Genera 3-4 respuestas rápidas usando el historial de la sesión."""
     try:
@@ -126,15 +165,39 @@ def chat():
     agent  = get_agent()
     config = {"configurable": {"thread_id": session_id}}
 
+    TOOL_STATUS = {
+        "buscar_poliza":              "Buscando póliza...",
+        "ontologia_reglas":           "Validando reglas de retención...",
+        "ontologia_diferenciadores":  "Analizando diferenciadores competitivos...",
+        "analizar_documento":         "Analizando documento adjunto...",
+    }
+
     def generate():
         try:
+            current_node = None
             for chunk, metadata in agent.stream(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
                 stream_mode="messages",
             ):
+                node = metadata.get("langgraph_node")
+
+                # Emitir estado al entrar en un nodo nuevo
+                if node != current_node:
+                    current_node = node
+                    if node == "agent":
+                        yield f"data: {json.dumps({'status': 'Pensando...'})}\n\n"
+
+                # Detectar tool calls para mostrar qué herramienta se va a usar
+                if node == "agent" and hasattr(chunk, "tool_calls") and chunk.tool_calls:
+                    for tc in chunk.tool_calls:
+                        name = tc.get("name", "")
+                        if name in TOOL_STATUS:
+                            yield f"data: {json.dumps({'status': TOOL_STATUS[name]})}\n\n"
+
+                # Tokens de respuesta final
                 if (
-                    metadata.get("langgraph_node") == "agent"
+                    node == "agent"
                     and isinstance(chunk.content, str)
                     and chunk.content
                 ):
@@ -154,13 +217,15 @@ def chat():
 
 # ── Endpoint de análisis de documentos ───────────────────────────────────────
 
-@app.route("/api/suggestions", methods=["GET"])
+@app.route("/api/suggestions", methods=["POST"])
 def suggestions():
-    """Genera sugerencias de respuesta para la sesión actual (llamada asíncrona post-chat)."""
-    session_id = request.args.get("session_id", "")
-    if not session_id:
+    """Genera sugerencias basadas en el último intercambio (sin consultar la BD)."""
+    data = request.get_json()
+    user_msg      = data.get("user_msg", "").strip()
+    assistant_msg = data.get("assistant_msg", "").strip()
+    if not assistant_msg:
         return jsonify([])
-    return jsonify(_generar_sugerencias(session_id))
+    return jsonify(_generar_sugerencias_rapidas(user_msg, assistant_msg))
 
 
 @app.route("/api/upload", methods=["POST"])
