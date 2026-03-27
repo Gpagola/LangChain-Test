@@ -140,6 +140,28 @@ def _generar_sugerencias(session_id: str) -> list:
     return []
 
 
+# ── Parser de resultado de buscar_poliza ─────────────────────────────────────
+
+def _parse_poliza_result(text: str) -> dict | None:
+    """Parsea el texto devuelto por buscar_poliza y retorna un dict estructurado."""
+    if "Póliza encontrada" not in text:
+        return None
+    def field(pattern):
+        m = re.search(pattern, text, re.IGNORECASE)
+        return m.group(1).strip() if m else None
+    edad_m = re.search(r"Edad[:\s]+(\d+)", text, re.IGNORECASE)
+    return {
+        "numero":        field(r"Número[:\s]+([^\n]+)"),
+        "cliente":       field(r"Cliente[:\s]+([^\n]+)"),
+        "ramo":          field(r"Ramo[:\s]+([^\n]+)"),
+        "antiguedad":    field(r"Antig[uü]edad[:\s]+([^\n]+)"),
+        "rentabilidad":  field(r"Rentabilidad[:\s]+([^\n]+)"),
+        "cp":            field(r"\bCP[:\s]+([^\n]+)"),
+        "edad":          edad_m.group(1) if edad_m else None,
+        "siniestralidad": field(r"Siniestralidad[:\s]+([^\n]+)"),
+    }
+
+
 # ── Endpoints de chat ─────────────────────────────────────────────────────────
 
 @app.route("/api/session/new", methods=["POST"])
@@ -194,6 +216,16 @@ def chat():
                         name = tc.get("name", "")
                         if name in TOOL_STATUS:
                             yield f"data: {json.dumps({'status': TOOL_STATUS[name]})}\n\n"
+
+                # Resultado de buscar_poliza → emitir evento estructurado
+                if node == "tools":
+                    content = chunk.content if hasattr(chunk, "content") else ""
+                    print(f"[tools] type={type(chunk).__name__} name={getattr(chunk, 'name', '-')} content_preview={str(content)[:80]!r}")
+                    if isinstance(content, str) and "Póliza encontrada" in content:
+                        poliza_data = _parse_poliza_result(content)
+                        if poliza_data:
+                            print(f"[tools] emitiendo poliza: {poliza_data}")
+                            yield f"data: {json.dumps({'poliza': poliza_data})}\n\n"
 
                 # Tokens de respuesta final
                 if (

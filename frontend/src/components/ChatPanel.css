@@ -50,6 +50,10 @@
 .rentabilidad-media  { background: #f59e0b22; color: #d97706; border: 1px solid #f59e0b55; }
 .rentabilidad-baja   { background: #ef444422; color: #dc2626; border: 1px solid #ef444455; }
 
+.siniestralidad-baja  { background: #16a34a22; color: #15803d; border: 1px solid #16a34a55; }
+.siniestralidad-media { background: #f59e0b22; color: #d97706; border: 1px solid #f59e0b55; }
+.siniestralidad-alta  { background: #ef444422; color: #dc2626; border: 1px solid #ef444455; }
+
 /* ── Mensajes ── */
 .messages {
   flex: 1;

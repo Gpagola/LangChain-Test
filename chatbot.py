@@ -355,13 +355,14 @@ def cargar_system_prompt() -> str:
 @tool
 def buscar_poliza(numero_poliza: str) -> str:
     """Busca los datos de una póliza por su número.
-    Retorna ramo, fecha de alta, antigüedad y rentabilidad.
+    Retorna nombre del cliente, ramo, fecha de alta, antigüedad, rentabilidad, CP, edad y siniestralidad.
     Usar cuando el ejecutivo proporcione el número de póliza del cliente."""
     conn = get_conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT numero_poliza, ramo, fecha_alta, rentabilidad
+            SELECT numero_poliza, ramo, fecha_alta, rentabilidad,
+                   cliente, cp, edad, siniestralidad
             FROM polizas
             WHERE numero_poliza = %s
         """, (numero_poliza.upper().strip(),))
@@ -373,17 +374,21 @@ def buscar_poliza(numero_poliza: str) -> str:
     if not row:
         return f"No se encontró ninguna póliza con el número '{numero_poliza}'."
 
-    numero, ramo, fecha_alta, rentabilidad = row
+    numero, ramo, fecha_alta, rentabilidad, cliente, cp, edad, siniestralidad = row
     from datetime import date
     antiguedad = (date.today() - fecha_alta).days // 365
 
     return (
         f"Póliza encontrada:\n"
         f"- Número: {numero}\n"
+        f"- Cliente: {cliente or 'No disponible'}\n"
         f"- Ramo: {ramo}\n"
         f"- Fecha de alta: {fecha_alta.strftime('%d/%m/%Y')}\n"
         f"- Antigüedad: {antiguedad} año(s)\n"
-        f"- Rentabilidad: {rentabilidad}"
+        f"- Rentabilidad: {rentabilidad}\n"
+        f"- CP: {cp or 'No disponible'}\n"
+        f"- Edad: {edad or 'No disponible'} años\n"
+        f"- Siniestralidad: {siniestralidad or 'No disponible'}"
     )
 
 

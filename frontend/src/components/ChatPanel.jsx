@@ -6,20 +6,6 @@ const API = "http://localhost:5001/api"
 
 const ACCEPTED = ".pdf,.jpg,.jpeg,.png,.webp"
 
-// Extrae datos de póliza — el número lo toma del mensaje del usuario
-function extractPoliza(responseText, userText) {
-  const clean = responseText.replace(/\*\*/g, "").replace(/\*/g, "")
-  const ramo         = clean.match(/Ramo[:\s]+([^\n\-–]+)/i)?.[1]?.trim()
-  const rentabilidad = clean.match(/Rentabilidad[:\s]+([^\n\-–]+)/i)?.[1]?.trim()
-  if (!ramo || !rentabilidad) return null
-
-  // Número de póliza viene del mensaje del usuario
-  const numero = userText?.match(/([A-Z]{2,}-\d+)/i)?.[1]?.toUpperCase()
-              || userText?.trim().toUpperCase()
-
-  const antiguedad = clean.match(/Antig[uü]edad[:\s]+([^\n\-–]+)/i)?.[1]?.trim()
-  return { numero, ramo, antiguedad, rentabilidad }
-}
 
 export default function ChatPanel({ onLoadingChange }) {
   const [sessionId, setSessionId]   = useState(null)
@@ -31,12 +17,13 @@ export default function ChatPanel({ onLoadingChange }) {
   const [isStreaming, setIsStreaming]   = useState(false)
   const [suggestions, setSuggestions]   = useState([])
   const [agentStatus, setAgentStatus]   = useState("")
-  const bottomRef  = useRef(null)
-  const textareaRef = useRef(null)
-  const abortRef   = useRef(null)
+  const bottomRef    = useRef(null)
+  const textareaRef  = useRef(null)
+  const abortRef     = useRef(null)
   const fileInputRef = useRef(null)
+  const genRef       = useRef(0)
 
-  async function streamChat(message, sessionId, controller, onToken, onStatus) {
+  async function streamChat(message, sessionId, controller, onToken, onStatus, onPoliza) {
     const res = await fetch(`${API}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -63,6 +50,7 @@ export default function ChatPanel({ onLoadingChange }) {
           const parsed = JSON.parse(data)
           if (parsed.error) throw new Error(parsed.error)
           if (parsed.status) onStatus?.(parsed.status)
+          if (parsed.poliza) onPoliza?.(parsed.poliza)
           if (parsed.token) { onStatus?.(""); onToken(parsed.token) }
         } catch (e) {
           if (e.message !== "SyntaxError") throw e
@@ -92,7 +80,7 @@ export default function ChatPanel({ onLoadingChange }) {
           } else {
             setMessages([{ role: "assistant", content: accumulated }])
           }
-        }, setAgentStatus)
+        }, setAgentStatus, setPoliza)
       } catch (e) {
         if (e.name !== "AbortError")
           setMessages([{ role: "assistant", content: `⚠️ Error al iniciar: ${e.message}` }])
@@ -116,7 +104,11 @@ export default function ChatPanel({ onLoadingChange }) {
 
   async function sendMessage() {
     const text = input.trim()
-    if ((!text && !attachedFile) || loading || !sessionId) return
+    if ((!text && !attachedFile) || !sessionId) return
+
+    // Abort any in-progress stream and claim this generation
+    abortRef.current?.abort()
+    const myGen = ++genRef.current
 
     const fileToSend = attachedFile
     setInput("")
@@ -168,13 +160,7 @@ export default function ChatPanel({ onLoadingChange }) {
             return msgs
           })
         }
-      }, setAgentStatus)
-
-      // Detectar si la respuesta contiene datos de póliza
-      if (!poliza) {
-        const found = extractPoliza(accumulated, text)
-        if (found) setPoliza(found)
-      }
+      }, setAgentStatus, setPoliza)
 
       // Pedir sugerencias en background sin bloquear el input
       fetch(`${API}/suggestions`, {
@@ -189,10 +175,13 @@ export default function ChatPanel({ onLoadingChange }) {
       if (e.name !== "AbortError")
         setMessages(prev => [...prev, { role: "assistant", content: `⚠️ Error: ${e.message}` }])
     } finally {
-      setLoading(false); onLoadingChange?.(false)
-      setIsStreaming(false)
-      setAgentStatus("")
-      abortRef.current = null
+      // Only reset loading state if no newer message has taken over
+      if (genRef.current === myGen) {
+        setLoading(false); onLoadingChange?.(false)
+        setIsStreaming(false)
+        setAgentStatus("")
+        abortRef.current = null
+      }
     }
   }
 
@@ -234,11 +223,32 @@ export default function ChatPanel({ onLoadingChange }) {
             <span className="session-label">Póliza</span>
             <span className="session-value">{poliza.numero}</span>
           </span>
+          {poliza.cliente && (<>
+            <span className="session-sep">·</span>
+            <span className="session-item">
+              <span className="session-label">Cliente</span>
+              <span className="session-value">{poliza.cliente}</span>
+            </span>
+          </>)}
           <span className="session-sep">·</span>
           <span className="session-item">
             <span className="session-label">Ramo</span>
             <span className="session-value">{poliza.ramo}</span>
           </span>
+          {poliza.edad && (<>
+            <span className="session-sep">·</span>
+            <span className="session-item">
+              <span className="session-label">Edad</span>
+              <span className="session-value">{poliza.edad} años</span>
+            </span>
+          </>)}
+          {poliza.cp && (<>
+            <span className="session-sep">·</span>
+            <span className="session-item">
+              <span className="session-label">CP</span>
+              <span className="session-value">{poliza.cp}</span>
+            </span>
+          </>)}
           <span className="session-sep">·</span>
           <span className="session-item">
             <span className="session-label">Antigüedad</span>
@@ -251,6 +261,15 @@ export default function ChatPanel({ onLoadingChange }) {
               {poliza.rentabilidad}
             </span>
           </span>
+          {poliza.siniestralidad && (<>
+            <span className="session-sep">·</span>
+            <span className="session-item">
+              <span className="session-label">Siniestralidad</span>
+              <span className={`session-badge siniestralidad-${poliza.siniestralidad?.toLowerCase()}`}>
+                {poliza.siniestralidad}
+              </span>
+            </span>
+          </>)}
         </div>
       )}
 
@@ -320,7 +339,7 @@ export default function ChatPanel({ onLoadingChange }) {
           <button
             className="attach-btn"
             onClick={() => fileInputRef.current?.click()}
-            disabled={loading || !sessionId}
+            disabled={!sessionId}
             title="Adjuntar PDF o imagen"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -335,7 +354,7 @@ export default function ChatPanel({ onLoadingChange }) {
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             rows={1}
-            disabled={loading || !sessionId}
+            disabled={!sessionId}
           />
           {loading ? (
             <button className="stop-btn" onClick={handleStop} title="Detener respuesta">

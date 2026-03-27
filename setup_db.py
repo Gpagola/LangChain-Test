@@ -24,7 +24,11 @@ CREATE TABLE IF NOT EXISTS polizas (
     numero_poliza VARCHAR(20)  PRIMARY KEY,
     ramo          VARCHAR(50)  NOT NULL,
     fecha_alta    DATE         NOT NULL,
-    rentabilidad  VARCHAR(10)  NOT NULL
+    rentabilidad  VARCHAR(10)  NOT NULL,
+    cliente       VARCHAR(100),
+    cp            VARCHAR(10),
+    edad          INT,
+    siniestralidad VARCHAR(10)
 );
 """
 
@@ -42,11 +46,12 @@ CREATE TABLE IF NOT EXISTS ontologias (
 # ── Datos mock: pólizas ──────────────────────────────────────────────────────
 
 POLIZAS_MOCK = [
-    ("POL-001", "Vida",  "2019-03-15", "alta"),
-    ("POL-002", "Auto",  "2022-07-01", "media"),
-    ("POL-003", "Hogar", "2021-11-20", "baja"),
-    ("POL-004", "Salud", "2020-05-10", "alta"),
-    ("POL-005", "Auto",  "2023-01-08", "media"),
+    #  numero       ramo     fecha_alta    rentab  cliente                    cp      edad  siniestralidad
+    ("POL-001", "Vida",  "2019-03-15", "alta",  "María García López",      "11001",  58,   "baja"),
+    ("POL-002", "Auto",  "2022-07-01", "media", "Carlos Martínez Ruiz",    "05001",  35,   "media"),
+    ("POL-003", "Hogar", "2021-11-20", "baja",  "Ana Rodríguez Pérez",     "76001",  42,   "alta"),
+    ("POL-004", "Salud", "2020-05-10", "alta",  "Roberto Jiménez Torres",  "08001",  67,   "media"),
+    ("POL-005", "Auto",  "2023-01-08", "media", "Luisa Fernanda Gómez",    "11001",  28,   "baja"),
 ]
 
 # ── Datos mock: ontología de reglas ──────────────────────────────────────────
@@ -251,7 +256,7 @@ SYSTEM_PROMPT = """Eres un asistente experto en retención de clientes para ejec
 
 1. **Saluda** al ejecutivo e inmediatamente pídele el número de póliza del cliente que quiere darse de baja.
 2. **Busca la póliza** usando la tool `buscar_poliza`. Si no existe, informa al ejecutivo y vuelve a pedir el número.
-3. **Presenta un resumen** de la póliza encontrada (ramo, antigüedad, rentabilidad) para que el ejecutivo tenga contexto.
+3. **Presenta un resumen** de la póliza encontrada (nombre del cliente, ramo, antigüedad, rentabilidad, siniestralidad) para que el ejecutivo tenga contexto.
 4. **Pregunta el motivo de baja** que el cliente está manifestando.
 5. **Consulta la ontología de reglas** usando la tool `ontologia_reglas` para obtener los argumentos de retención disponibles.
 6. **Elige UN solo argumento** — el que consideres más fuerte dado el perfil de la póliza y el motivo de baja — y sugiere solo ese al ejecutivo. Sigue las instrucciones de la ontología para elegir y avanzar según la reacción del cliente.
@@ -290,6 +295,21 @@ seguido del análisis completo del documento realizado por un sistema externo. E
 - Si es una **queja**: reconócela y usa `ontologia_reglas` para el motivo "Mala experiencia".
 - Presenta al ejecutivo un resumen breve del documento y sugiere los pasos a seguir.
 
+## Perfil del cliente — cómo usarlo en el argumentario
+
+Cuando `buscar_poliza` devuelva los datos del cliente, tenlos en cuenta así:
+
+- **Nombre del cliente**: personaliza el discurso del ejecutivo (ej: "María lleva 7 años con nosotros..."). No te dirijas al cliente por su nombre directamente — recuerda que hablas con el ejecutivo.
+- **Edad**: adapta el argumentario al perfil de vida del cliente:
+  - Clientes jóvenes (< 35 años): valoran flexibilidad, precio y tecnología.
+  - Clientes de mediana edad (35–55 años): valoran estabilidad, historial acumulado y cobertura familiar.
+  - Clientes mayores (> 55 años): valoran continuidad, atención personalizada y tranquilidad.
+- **CP (código postal)**: úsalo para contextualizar servicios regionales si son relevantes (red de talleres, especialistas médicos, cobertura local).
+- **Siniestralidad**: es información interna para el ejecutivo — no la menciones directamente al cliente:
+  - **Baja**: cliente muy rentable. Máximo esfuerzo de retención. Puedes recomendar ofrecer condiciones especiales (descuentos, beneficios por fidelidad).
+  - **Media**: argumentario estándar de valor y continuidad.
+  - **Alta**: sé cauteloso con concesiones económicas. Enfócate en el valor de la cobertura, no en descuentos. Informa al ejecutivo de forma discreta si el margen es limitado.
+
 ## Reglas generales
 
 - Habla siempre en español, de forma profesional pero cercana.
@@ -311,11 +331,29 @@ def setup():
     print("Creando tabla ontologias...")
     cur.execute(CREATE_ONTOLOGIAS)
 
-    print("Insertando pólizas mock...")
+    print("Añadiendo columnas nuevas si no existen...")
+    for col_def in [
+        "ALTER TABLE polizas ADD COLUMN IF NOT EXISTS cliente       VARCHAR(100)",
+        "ALTER TABLE polizas ADD COLUMN IF NOT EXISTS cp            VARCHAR(10)",
+        "ALTER TABLE polizas ADD COLUMN IF NOT EXISTS edad          INT",
+        "ALTER TABLE polizas ADD COLUMN IF NOT EXISTS siniestralidad VARCHAR(10)",
+    ]:
+        cur.execute(col_def)
+
+    print("Insertando/actualizando pólizas mock...")
     for pol in POLIZAS_MOCK:
         cur.execute("""
-            INSERT IGNORE INTO polizas (numero_poliza, ramo, fecha_alta, rentabilidad)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO polizas (numero_poliza, ramo, fecha_alta, rentabilidad,
+                                 cliente, cp, edad, siniestralidad)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                ramo           = VALUES(ramo),
+                fecha_alta     = VALUES(fecha_alta),
+                rentabilidad   = VALUES(rentabilidad),
+                cliente        = VALUES(cliente),
+                cp             = VALUES(cp),
+                edad           = VALUES(edad),
+                siniestralidad = VALUES(siniestralidad)
         """, pol)
 
     print("Insertando/actualizando ontologia-reglas...")
