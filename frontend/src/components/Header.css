@@ -4,9 +4,7 @@
   justify-content: space-between;
   padding: 0 28px;
   height: 76px;
-  background: linear-gradient(270deg, #c850c0, #4158d0, #0093e9, #f97316, #3a1c71, #c850c0);
-  background-size: 400% 400%;
-  animation: none;
+  background: #fff;
   border-bottom: none;
   flex-shrink: 0;
 }
@@ -17,7 +15,15 @@
   100% { background-position: 0% 50%; }
 }
 
-.header.animating {
+.header-bar {
+  height: 8px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, #c850c0, #4158d0, #0093e9, #f97316, #3a1c71, #c850c0);
+  background-size: 400% 100%;
+  background-position: 0% 0%;
+}
+
+.header-bar.animating {
   animation: gradientShift 20s ease infinite;
 }
 
@@ -25,13 +31,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #fff;
-  height: 100%;
-  padding-right: 24px;
-  margin-left: -28px;
-  padding-left: 28px;
   flex-shrink: 0;
-  box-sizing: border-box;
   min-width: 380px;
 }
 
@@ -88,17 +88,17 @@
   height: 34px;
   padding: 0 14px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.4);
-  background: rgba(240,240,240,0.85);
+  border: 1px solid #ddd;
+  background: #f0f0f0;
   color: #444;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
 }
 
-.admin-toggle:hover { background: rgba(220,220,220,0.95); }
-.admin-toggle.active { background: rgba(240,240,240,0.85); color: #444; border-color: rgba(255,255,255,0.4); }
+.admin-toggle:hover { background: #e2e2e2; }
+.admin-toggle.active { background: #f0f0f0; color: #444; border-color: #ddd; }
 
 /* ── Theme switch ── */
 .theme-switch {

@@ -28,7 +28,8 @@ export default function Header({ adminOpen, adminWidth, onToggleAdmin, onNewCase
   const isDark = theme === "dark"
 
   return (
-    <header className={`header${loading ? " animating" : ""}`}>
+    <>
+    <header className="header">
       <div className="header-left" style={adminOpen ? { width: adminWidth } : {}}>
         <img
           src="/logos/logo.jpg"
@@ -72,5 +73,7 @@ export default function Header({ adminOpen, adminWidth, onToggleAdmin, onNewCase
         </button>
       </div>
     </header>
+    <div className={`header-bar${loading ? " animating" : ""}`} />
+    </>
   )
 }

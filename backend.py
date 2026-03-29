@@ -149,7 +149,7 @@ def _parse_poliza_result(text: str) -> dict | None:
     def field(pattern):
         m = re.search(pattern, text, re.IGNORECASE)
         return m.group(1).strip() if m else None
-    edad_m = re.search(r"Edad[:\s]+(\d+)", text, re.IGNORECASE)
+    edad_m = re.search(r"-\s*Edad[:\s]+(\d+)", text, re.IGNORECASE)
     return {
         "numero":        field(r"Número[:\s]+([^\n]+)"),
         "cliente":       field(r"Cliente[:\s]+([^\n]+)"),
