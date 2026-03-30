@@ -32,7 +32,7 @@ export default function Header({ adminOpen, adminWidth, onToggleAdmin, onNewCase
     <header className="header">
       <div className="header-left" style={adminOpen ? { width: adminWidth } : {}}>
         <img
-          src="/logos/logo.jpg"
+          src={`${import.meta.env.BASE_URL}logos/logo.jpg`}
           alt="Logo"
           className="header-logo"
           onError={e => { e.target.style.display = "none" }}

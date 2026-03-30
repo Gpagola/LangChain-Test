@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import ReactMarkdown from "react-markdown"
 import "./ChatPanel.css"
 
-const API = "http://localhost:5001/api"
+const API = import.meta.env.VITE_API_URL || "/api"
 
 const ACCEPTED = ".pdf,.jpg,.jpeg,.png,.webp"
 
