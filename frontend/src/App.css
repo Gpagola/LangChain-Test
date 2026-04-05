@@ -5,6 +5,46 @@
   background: var(--bg-app);
 }
 
+.app-row {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.app-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Full-height sidebar label (Palantir style) ── */
+.app-sidebar-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 58px;
+  flex-shrink: 0;
+  background: var(--bg-app);
+  border-right: 1px solid var(--border);
+  padding: 116px 0 24px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.sidebar-title {
+  font-family: "Alliance No.1", sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  white-space: nowrap;
+  transform: rotate(180deg);
+  margin: 0 auto;
+}
+
 .app-body {
   display: flex;
   flex: 1;
@@ -53,26 +93,28 @@
 .center-nav {
   display: flex;
   gap: 28px;
-  padding: 0 32px;
-  height: 42px;
-  align-items: center;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+  padding: 8px 32px 6px;
+  align-items: flex-end;
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   flex-shrink: 0;
+  position: relative;
+  z-index: 5;
 }
 
 .center-nav-item {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-family: "Alliance No.2", sans-serif;
+  font-family: "Alliance No.1", sans-serif;
   font-size: 14px;
   font-weight: 400;
   cursor: pointer;
   transition: color 0.15s;
-  padding: 0;
+  padding: 4px 0 6px;
   position: relative;
-  height: 100%;
   display: flex;
   align-items: center;
 }
@@ -94,19 +136,92 @@
   background: var(--text);
 }
 
+.center-nav-spacer { flex: 1; }
+
+/* ── Nuevo caso (in nav) ── */
+.nav-new-case {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 0;
+  border: 1px solid var(--text);
+  background: transparent;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.nav-new-case:hover { background: var(--text); color: var(--bg-panel); }
+
+/* ── Theme switch (in nav) ── */
+.nav-theme-switch {
+  position: relative;
+  width: 48px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background 0.3s, border-color 0.3s;
+  flex-shrink: 0;
+  box-shadow: none;
+}
+
+.nav-switch-knob {
+  position: absolute;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: none;
+}
+
+.nav-theme-switch.dark  .nav-switch-knob { left: 2px; }
+.nav-theme-switch.light .nav-switch-knob { left: 26px; }
+
+.nav-switch-moon,
+.nav-switch-sun {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.nav-switch-moon { left: 4px; }
+.nav-switch-sun  { right: 4px; }
+
+.nav-theme-switch:hover { border-color: var(--border-focus); }
+.nav-theme-switch:focus { outline: none; }
+.nav-theme-switch:focus-visible { outline: none; }
+
 /* ── Hero title ── */
 .center-hero {
   padding: 28px 32px 20px;
   flex-shrink: 0;
   background: var(--bg-chat);
+  position: relative;
+  z-index: 4;
 }
 
 .center-hero-title {
-  font-family: "Alliance No.2", sans-serif;
-  font-size: 48px;
+  font-family: "Alliance No.1", sans-serif;
+  font-size: 28px;
   font-weight: 400;
   color: var(--text);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   margin: 0;
   line-height: 1.1;
 }
@@ -117,6 +232,18 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.center-content.no-hero .messages {
+  padding-top: 0;
+}
+
+.center-content.no-hero .messages .message-row:first-of-type {
+  margin-top: 24px;
+}
+
+.center-content.no-hero .messages .session-bar + .message-row {
+  margin-top: 24px;
 }
 
 /* ── Optimizer prompt (shared) ── */

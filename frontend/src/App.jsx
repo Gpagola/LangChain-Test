@@ -5,13 +5,12 @@ import ChatPanel from "./components/ChatPanel"
 import AutopilotPanel from "./components/AutopilotPanel"
 import "./App.css"
 
-const MIN_WIDTH = 380
+const MIN_WIDTH = 360
 const MAX_WIDTH = 600
-const DEFAULT_WIDTH = 380
+const DEFAULT_WIDTH = 360
 
 export default function App() {
-  const [appMode, setAppMode] = useState("ontologist") // "ontologist" | "user"
-  const [activeTab, setActiveTab] = useState("lab")     // "lab" | "test"
+  const [activeTab, setActiveTab] = useState("lab")     // "lab" | "test" | "user"
   const [adminWidth, setAdminWidth] = useState(DEFAULT_WIDTH)
   const [resetKey, setResetKey] = useState(0)
   const [theme, setTheme] = useState("light")
@@ -58,58 +57,107 @@ export default function App() {
     window.addEventListener("mouseup", onMouseUp)
   }, [adminWidth])
 
-  const isOntologist = appMode === "ontologist"
+  const showAdmin = activeTab === "lab" || activeTab === "test"
+
+  const TAB_TITLES = { lab: "Auto-test", test: "Manual-test", user: "User-test" }
 
   return (
     <div className="app">
-      <Header
-        appMode={appMode}
-        onToggleMode={() => { setAppMode(m => m === "ontologist" ? "user" : "ontologist"); handleReset() }}
-        onNewCase={handleReset}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        loading={chatLoading}
-        adminWidth={isOntologist ? adminWidth : undefined}
-      />
-      <div className="app-body">
-        {isOntologist && (
-          <>
-            <AdminPanel onSaved={handleReset} width={adminWidth} />
-            <div className="resize-handle" onMouseDown={onMouseDown} />
-          </>
+      <div className="app-row">
+        {showAdmin && (
+          <div className="app-sidebar-label">
+            <span className="sidebar-title">Smart Retain → Guiado por Ontologías</span>
+          </div>
         )}
+        <div className="app-col">
+          <Header
+            loading={chatLoading}
+            adminWidth={showAdmin ? adminWidth : undefined}
+          />
+          <div className="app-body">
+            {showAdmin && (
+              <>
+                <AdminPanel onSaved={handleReset} width={adminWidth} />
+                <div className="resize-handle" onMouseDown={onMouseDown} />
+              </>
+            )}
 
-        {isOntologist ? (
           <div className="center-panel">
             <div className="center-nav">
               <button
                 className={`center-nav-item ${activeTab === "lab" ? "active" : ""}`}
                 onClick={() => { setActiveTab("lab"); handleReset() }}
               >
-                Autopilot
+                Auto-test
               </button>
               <button
                 className={`center-nav-item ${activeTab === "test" ? "active" : ""}`}
                 onClick={() => { setActiveTab("test"); handleReset() }}
               >
-                Prueba manual
+                Manual-test
+              </button>
+              <button
+                className={`center-nav-item ${activeTab === "user" ? "active" : ""}`}
+                onClick={() => { setActiveTab("user"); handleReset() }}
+              >
+                User-test
+              </button>
+
+              <div className="center-nav-spacer" />
+
+              <button className="nav-new-case" onClick={handleReset} title="Nuevo caso">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span>Nuevo caso</span>
+              </button>
+
+              <button
+                className={`nav-theme-switch ${theme === "dark" ? "dark" : "light"}`}
+                onClick={toggleTheme}
+                title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+              >
+                <span className="nav-switch-knob" />
+                <span className="nav-switch-moon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                  </svg>
+                </span>
+                <span className="nav-switch-sun">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="5"/>
+                    <line x1="12" y1="1" x2="12" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="23"/>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                    <line x1="1" y1="12" x2="3" y2="12"/>
+                    <line x1="21" y1="12" x2="23" y2="12"/>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                  </svg>
+                </span>
               </button>
             </div>
             <div className="center-hero">
               <h1 className="center-hero-title">
-                {activeTab === "lab" ? "Autopilot" : "Prueba Manual"}
+                {TAB_TITLES[activeTab]}
               </h1>
             </div>
             <div className="center-content">
-              {activeTab === "lab"
-                ? <AutopilotPanel key={`ap-${resetKey}`} onLoadingChange={setChatLoading} />
-                : <ChatPanel key={`test-${resetKey}`} onLoadingChange={setChatLoading} onNewCase={handleReset} showEval />
-              }
+              {activeTab === "lab" && (
+                <AutopilotPanel key={`ap-${resetKey}`} onLoadingChange={setChatLoading} />
+              )}
+              {activeTab === "test" && (
+                <ChatPanel key={`test-${resetKey}`} onLoadingChange={setChatLoading} onNewCase={handleReset} showEval />
+              )}
+              {activeTab === "user" && (
+                <ChatPanel key={`user-${resetKey}`} onLoadingChange={setChatLoading} onNewCase={handleReset} showEval />
+              )}
             </div>
           </div>
-        ) : (
-          <ChatPanel key={`user-${resetKey}`} onLoadingChange={setChatLoading} onNewCase={handleReset} />
-        )}
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -1,26 +1,33 @@
 /* ── Radar Chart — Palantir style ─────────────────────────────────────────── */
 
 .radar-chart {
-  padding: 16px 12px;
+  width: 280px;
+  height: 250px;
+  padding: 12px 8px 4px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
 }
 
 .radar-header {
   display: flex;
   align-items: baseline;
+  justify-content: center;
   gap: 8px;
   padding: 0 4px;
 }
 
 .radar-title {
-  font-family: "Alliance No.2", sans-serif;
+  font-family: "Alliance No.1", sans-serif;
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.10em;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 .radar-waiting {
@@ -31,7 +38,6 @@
 
 .radar-svg {
   width: 100%;
-  max-width: 280px;
   height: auto;
   margin: 0 auto;
 }
@@ -39,13 +45,15 @@
 /* Grid */
 .radar-grid {
   fill: none;
-  stroke: var(--border);
-  stroke-width: 0.5;
+  stroke: var(--text-muted);
+  stroke-width: 0.8;
+  opacity: 0.6;
 }
 
 .radar-axis {
-  stroke: var(--border);
-  stroke-width: 0.5;
+  stroke: var(--text-muted);
+  stroke-width: 0.8;
+  opacity: 0.6;
 }
 
 /* Data polygon */
@@ -66,10 +74,10 @@
 
 /* Labels */
 .radar-label {
-  font-family: "Alliance No.2", sans-serif;
-  font-size: 10px;
-  font-weight: 400;
-  fill: var(--text-muted);
+  font-family: "Alliance No.1", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  fill: var(--text);
   letter-spacing: 0.02em;
 }
 
@@ -78,59 +86,3 @@
   font-weight: 500;
 }
 
-/* ── Legend bars ────────────────────────────────────────────────────────────── */
-
-.radar-legend {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 8px 4px 0;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
-
-.radar-legend-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.radar-legend-label {
-  font-size: 10px;
-  color: var(--text-muted);
-  width: 80px;
-  flex-shrink: 0;
-  letter-spacing: 0.02em;
-}
-
-.radar-legend-bar-track {
-  flex: 1;
-  height: 3px;
-  background: var(--border);
-  border-radius: 1px;
-  overflow: hidden;
-}
-
-.radar-legend-bar-fill {
-  height: 100%;
-  border-radius: 1px;
-  background: var(--text-muted);
-  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.radar-legend-bar-fill.mid {
-  background: var(--text-muted);
-}
-
-.radar-legend-bar-fill.high {
-  background: var(--text);
-}
-
-.radar-legend-val {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-muted);
-  min-width: 22px;
-  text-align: right;
-  font-family: "Menlo", monospace;
-}

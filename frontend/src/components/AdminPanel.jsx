@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react"
+import { createPortal } from "react-dom"
 import "./AdminPanel.css"
 
 const API = import.meta.env.VITE_API_URL || "/api"
@@ -231,10 +232,6 @@ export default function AdminPanel({ onSaved, width }) {
 
   return (
     <aside className="admin-panel" style={width ? { width, minWidth: width, maxWidth: width } : {}}>
-      <div className="admin-sidebar-label">
-        <span className="sidebar-title">Ontología: Retención</span>
-      </div>
-      <div className="admin-main">
       <div className="admin-tabs">
         <div className="admin-tab-col">
           <span className="admin-tab-label">Ontología</span>
@@ -251,7 +248,7 @@ export default function AdminPanel({ onSaved, width }) {
           </div>
         </div>
         <div className="admin-tab-col">
-          <span className="admin-tab-label">Autopilot</span>
+          <span className="admin-tab-label">Auto-test</span>
           <div className="admin-tab-group">
             {sorted.filter(o => o.nombre.startsWith("autopilot-")).map(o => (
               <button
@@ -338,10 +335,13 @@ export default function AdminPanel({ onSaved, width }) {
       </div>
 
       {/* ── Modal expandido ── */}
-      {expanded && (
+      {expanded && createPortal(
         <div className="admin-expand-overlay">
           <div className="admin-expand-modal">
             <div className="admin-expand-body">
+              <div className="admin-expand-sidebar">
+                <span className="sidebar-title">Smart Retain → Guiado por Ontologías</span>
+              </div>
               <div className="admin-expand-main">
                 <div className="admin-expand-header">
                   <div className="admin-tabs expanded">
@@ -360,7 +360,7 @@ export default function AdminPanel({ onSaved, width }) {
                       </div>
                     </div>
                     <div className="admin-tab-col">
-                      <span className="admin-tab-label">Autopilot</span>
+                      <span className="admin-tab-label">Auto-test</span>
                       <div className="admin-tab-group">
                         {sorted.filter(o => o.nombre.startsWith("autopilot-")).map(o => (
                           <button
@@ -436,16 +436,21 @@ export default function AdminPanel({ onSaved, width }) {
                       <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                     </svg>
                   </button>
+                  <button
+                    className="expand-toggle"
+                    onClick={() => setExpanded(false)}
+                    title="Reducir editor"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                  </button>
                 </div>
-              </div>
-              <div className="admin-expand-sidebar">
-                <span className="sidebar-title">Ontología: Retención</span>
               </div>
             </div>
           </div>
-        </div>
+        </div>, document.body
       )}
-      </div>
     </aside>
   )
 }

@@ -44,27 +44,28 @@ def get_agent():
 # ── Generador de sugerencias rápidas ─────────────────────────────────────────
 
 def _analyze_risk_profile(conversation_text: str) -> dict | None:
-    """Analiza la conversación y devuelve scores 0-100 para 6 dimensiones de riesgo de baja."""
+    """Analiza la conversación y devuelve scores de riesgo, retención y sentimiento."""
     try:
         client = OpenAI()
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (
-                    "Analiza esta conversación de retención de seguros y puntúa de 0 a 100 "
-                    "el nivel de riesgo detectado en cada dimensión. 0=no detectado, 100=riesgo máximo.\n"
-                    "Dimensiones:\n"
-                    "1. precio: percepción de sobrecoste, subida de prima, 'pago mucho para lo que recibo'\n"
-                    "2. competencia: ofertas de competidores, comparativas, 'me dan más por menos'\n"
-                    "3. experiencia: mala experiencia con siniestros o atención al cliente\n"
-                    "4. valor: falta de valor percibido, 'nunca lo uso', 'no me aporta'\n"
-                    "5. situacion: cambios personales (mudanza, venta de coche, cambios familiares)\n"
-                    "6. vinculacion: relación débil con la compañía, cliente monoproducto\n\n"
-                    "Responde SOLO JSON: {\"precio\":N,\"competencia\":N,\"experiencia\":N,\"valor\":N,\"situacion\":N,\"vinculacion\":N}"
+                    "Analiza esta conversación de retención de seguros y devuelve:\n"
+                    "1. Riesgo por dimensión (0-100, 0=no detectado, 100=riesgo máximo):\n"
+                    "   - precio: percepción de sobrecoste, subida de prima\n"
+                    "   - competencia: ofertas de competidores, comparativas\n"
+                    "   - experiencia: mala experiencia con siniestros o atención\n"
+                    "   - valor: falta de valor percibido, 'nunca lo uso'\n"
+                    "   - situacion: cambios personales (mudanza, venta, familia)\n"
+                    "   - vinculacion: relación débil con la compañía\n"
+                    "2. retencion: probabilidad de retener al cliente (0-100)\n"
+                    "3. sentimiento: estado emocional actual del cliente (-100 muy negativo a +100 muy positivo)\n\n"
+                    "Responde SOLO JSON: {\"precio\":N,\"competencia\":N,\"experiencia\":N,\"valor\":N,\"situacion\":N,\"vinculacion\":N,\"retencion\":N,\"sentimiento\":N}"
                 )},
                 {"role": "user", "content": conversation_text[-2000:]},
             ],
-            max_tokens=80,
+            max_tokens=120,
             temperature=0.1,
         )
         raw = response.choices[0].message.content.strip()
@@ -72,6 +73,8 @@ def _analyze_risk_profile(conversation_text: str) -> dict | None:
         result = json.loads(raw)
         for key in ["precio", "competencia", "experiencia", "valor", "situacion", "vinculacion"]:
             result[key] = max(0, min(100, int(result.get(key, 0))))
+        result["retencion"] = max(0, min(100, int(result.get("retencion", 50))))
+        result["sentimiento"] = max(-100, min(100, int(result.get("sentimiento", 0))))
         return result
     except Exception as e:
         print(f"[risk_profile] error: {e}")
@@ -236,6 +239,23 @@ def chat():
 
     def generate():
         try:
+            # Risk profile al recibir el mensaje del cliente (antes de que responda el agente)
+            try:
+                prev_state = get_agent().get_state(config)
+                prev_msgs = prev_state.values.get("messages", [])
+                conv_lines = [
+                    f"{'Cliente' if m.type == 'human' else 'Agente'}: {m.content[:300]}"
+                    for m in prev_msgs
+                    if hasattr(m, "content") and isinstance(m.content, str) and m.content.strip()
+                ]
+                conv_lines.append(f"Cliente: {message[:300]}")
+                if len(conv_lines) > 2:
+                    risk = _analyze_risk_profile("\n".join(conv_lines))
+                    if risk:
+                        yield f"data: {json.dumps({'risk_profile': risk})}\n\n"
+            except Exception as ex:
+                print(f"[risk_profile chat] {ex}")
+
             current_node = None
             agent_response = ""
 
@@ -267,22 +287,6 @@ def chat():
                 if node == "agent" and isinstance(chunk.content, str) and chunk.content:
                     agent_response += chunk.content
                     yield f"data: {json.dumps({'token': chunk.content})}\n\n"
-
-            # Risk profile analysis
-            if agent_response.strip():
-                try:
-                    state = get_agent().get_state(config)
-                    conv_msgs = state.values.get("messages", [])
-                    conv_text = "\n".join(
-                        f"{'Cliente' if m.type == 'human' else 'Agente'}: {m.content[:300]}"
-                        for m in conv_msgs
-                        if hasattr(m, "content") and isinstance(m.content, str) and m.content.strip()
-                    )
-                    risk = _analyze_risk_profile(conv_text)
-                    if risk:
-                        yield f"data: {json.dumps({'risk_profile': risk})}\n\n"
-                except Exception as ex:
-                    print(f"[risk_profile chat] {ex}")
 
             # Generar sugerencias al final con la respuesta completa — prompt mínimo
             if agent_response.strip():
@@ -617,13 +621,13 @@ def apply_recommendation():
 
     try:
         resp = openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5.4",
             messages=[
                 {"role": "system", "content": SYSTEM_APLICAR},
                 {"role": "user",   "content": prompt},
             ],
-            temperature=0.2,
-            max_tokens=4000,
+            reasoning={"effort": "low"},
+            max_completion_tokens=4000,
         )
         contenido_nuevo = resp.choices[0].message.content.strip()
     except Exception as e:
@@ -725,12 +729,9 @@ def autopilot_run(session_id):
             transcripcion.append({"role": "ejecutivo", "content": primer_msg})
             yield f"data: {json.dumps({'type': 'turn', 'role': 'ejecutivo', 'content': primer_msg})}\n\n"
 
-            def _stream_agent(input_msg, turno_label):
-                """Corre un turno del agente y hace yield de eventos SSE detallados."""
-                def ts(): return int(time.time() * 1000)
-
+            def _stream_agent(input_msg):
+                """Corre un turno del agente y hace yield de eventos SSE."""
                 response = ""
-                yield f"data: {json.dumps({'type': 'trace', 'turno': turno_label, 'event': 'thinking', 'ts': ts()})}\n\n"
                 for chunk, metadata in agent.stream(
                     {"messages": [HumanMessage(content=input_msg)]},
                     config=config,
@@ -741,14 +742,9 @@ def autopilot_run(session_id):
                     if node == "agent" and hasattr(chunk, "tool_calls") and chunk.tool_calls:
                         for tc in chunk.tool_calls:
                             tool_name = tc.get("name", "")
-                            tool_args = tc.get("args", {})
                             yield f"data: {json.dumps({'type': 'tool', 'name': tool_name})}\n\n"
-                            yield f"data: {json.dumps({'type': 'trace', 'turno': turno_label, 'event': 'tool_call', 'tool': tool_name, 'args': tool_args, 'ts': ts()})}\n\n"
 
                     if node == "tools" and hasattr(chunk, "content") and isinstance(chunk.content, str):
-                        tool_name_res = getattr(chunk, "name", "tool")
-                        preview = chunk.content[:200].replace("\n", " ")
-                        yield f"data: {json.dumps({'type': 'trace', 'turno': turno_label, 'event': 'tool_result', 'tool': tool_name_res, 'preview': preview, 'ts': ts()})}\n\n"
                         if "Póliza encontrada" in chunk.content:
                             poliza_data = _parse_poliza_result(chunk.content)
                             if poliza_data:
@@ -759,13 +755,12 @@ def autopilot_run(session_id):
                         yield f"data: {json.dumps({'type': 'agent_token', 'token': chunk.content})}\n\n"
 
                 if response:
-                    yield f"data: {json.dumps({'type': 'trace', 'turno': turno_label, 'event': 'agent_response', 'chars': len(response), 'ts': ts()})}\n\n"
                     yield f"data: {json.dumps({'type': 'agent_end'})}\n\n"
                 return response
 
             # Agente responde al primer mensaje
             agent_response = ""
-            for event in _stream_agent(primer_msg, "T0"):
+            for event in _stream_agent(primer_msg):
                 if event.startswith("data:"):
                     # Extraer respuesta acumulada del generador
                     pass
@@ -804,11 +799,23 @@ def autopilot_run(session_id):
                 transcripcion.append({"role": "cliente", "content": msg_cliente})
                 yield f"data: {json.dumps({'type': 'turn', 'role': 'cliente', 'content': msg_cliente})}\n\n"
 
+                # Risk profile al recibir mensaje del cliente
+                try:
+                    conv_text = "\n".join(
+                        f"{t['role'].capitalize()}: {t['content'][:300]}"
+                        for t in transcripcion
+                    )
+                    risk = _analyze_risk_profile(conv_text)
+                    if risk:
+                        yield f"data: {json.dumps({'type': 'risk_profile', 'data': risk})}\n\n"
+                except Exception as ex:
+                    print(f"[risk_profile autopilot] {ex}")
+
                 if decision in ("retenido", "cancelado"):
                     break
 
                 # Agente responde
-                for event in _stream_agent(msg_cliente, f"T{turno+1}"):
+                for event in _stream_agent(msg_cliente):
                     yield event
 
                 # Leer respuesta acumulada del estado
@@ -821,18 +828,6 @@ def autopilot_run(session_id):
                     transcripcion.append({"role": "asistente", "content": agent_response})
                     historial_cliente.append({"role": "assistant", "content": msg_cliente})
                     historial_cliente.append({"role": "user", "content": agent_response[:200]})
-
-                    # Risk profile after each agent response
-                    try:
-                        conv_text = "\n".join(
-                            f"{t['role'].capitalize()}: {t['content'][:300]}"
-                            for t in transcripcion
-                        )
-                        risk = _analyze_risk_profile(conv_text)
-                        if risk:
-                            yield f"data: {json.dumps({'type': 'risk_profile', 'data': risk})}\n\n"
-                    except Exception as ex:
-                        print(f"[risk_profile autopilot] {ex}")
 
                     if any(k in agent_response.lower() for k in CIERRE_KEYWORDS):
                         decision = decision or "cancelado"

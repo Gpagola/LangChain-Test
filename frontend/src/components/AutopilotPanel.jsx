@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react"
 import ReactMarkdown from "react-markdown"
 import { EvaluationModal } from "./EvaluationCard"
 import RadarChart from "./RadarChart"
+import RetentionGauge from "./RetentionGauge"
+import SentimentLine from "./SentimentLine"
 import "./AutopilotPanel.css"
 
 const API = import.meta.env.VITE_API_URL || "/api"
@@ -35,15 +37,14 @@ export default function AutopilotPanel({ onLoadingChange }) {
   const [toolStatus, setToolStatus] = useState("")
   const [evaluating, setEvaluating] = useState(false)
   const [evaluation, setEvaluation] = useState(null)
-  const [traceEvents, setTrace]     = useState([])     // eventos internos del agente
   const [showOptPrompt, setShowOptPrompt] = useState(false)
   const [riskProfile, setRiskProfile]     = useState(null)
-  const convDataRef = useRef(null)   // transcripcion + decision del autopilot
-
+  const [retention, setRetention]         = useState(null)
+  const [sentimentPts, setSentimentPts]   = useState([])
+  const convDataRef = useRef(null)
 
   const abortRef   = useRef(null)
   const bottomRef  = useRef(null)
-  const traceRef   = useRef(null)
 
   // Cargar opciones al montar
   useEffect(() => {
@@ -77,8 +78,9 @@ export default function AutopilotPanel({ onLoadingChange }) {
     setToolStatus("")
     setEvaluating(false)
     setCaso(null)
-    setTrace([])
     setRiskProfile(null)
+    setRetention(null)
+    setSentimentPts([])
 
     const body = mode === "random" ? {} : {
       numero_poliza: poliza || undefined,
@@ -195,6 +197,8 @@ export default function AutopilotPanel({ onLoadingChange }) {
 
             case "risk_profile":
               setRiskProfile(ev.data)
+              if (ev.data.retencion != null) setRetention(ev.data.retencion)
+              if (ev.data.sentimiento != null) setSentimentPts(prev => [...prev, ev.data.sentimiento])
               break
 
             case "done_conversation":
@@ -203,15 +207,6 @@ export default function AutopilotPanel({ onLoadingChange }) {
                 decision: ev.decision,
               }
               setShowOptPrompt(true)
-              break
-
-            case "trace":
-              console.log("[trace]", ev.event, "ts:", ev.ts)
-              setTrace(prev => {
-                const last = prev[prev.length - 1]
-                const delta = (last?.ts != null && ev.ts != null) ? ev.ts - last.ts : null
-                return [...prev, { ...ev, delta }]
-              })
               break
 
             case "error":
@@ -269,7 +264,6 @@ export default function AutopilotPanel({ onLoadingChange }) {
     setTurns([])
     setAgentBuf("")
     setEvaluation(null)
-    setTrace([])
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -281,8 +275,7 @@ export default function AutopilotPanel({ onLoadingChange }) {
 
       {/* ── Config (arriba, siempre visible) ── */}
       <div className="ap-config">
-        <div className="ap-config-title">Configuración del caso</div>
-        <div className="ap-config-fields">
+        <div className="ap-config-row">
           <div className="ap-field">
             <label>Póliza</label>
             <select value={poliza} onChange={e => setPoliza(e.target.value)} disabled={running}>
@@ -296,30 +289,41 @@ export default function AutopilotPanel({ onLoadingChange }) {
           </div>
           <div className="ap-field">
             <label>Motivo de cancelación</label>
-            <select value={motivo} onChange={e => setMotivo(e.target.value)} disabled={running}>
-              <option value="">Aleatorio</option>
-              {opciones.motivos.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+            <input
+              list="motivos-list"
+              value={motivo}
+              onChange={e => setMotivo(e.target.value)}
+              placeholder="Aleatorio"
+              disabled={running}
+            />
+            <datalist id="motivos-list">
+              {opciones.motivos.map(m => <option key={m} value={m} />)}
+            </datalist>
           </div>
           <div className="ap-field">
             <label>Personalidad del cliente</label>
-            <select value={personalidad} onChange={e => setPersona(e.target.value)} disabled={running}>
-              <option value="">Aleatoria</option>
-              {opciones.personalidades.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+            <input
+              list="personalidades-list"
+              value={personalidad}
+              onChange={e => setPersona(e.target.value)}
+              placeholder="Aleatoria"
+              disabled={running}
+            />
+            <datalist id="personalidades-list">
+              {opciones.personalidades.map(p => <option key={p} value={p} />)}
+            </datalist>
           </div>
-        </div>
-
-        <div className="ap-actions">
-          {!running ? (
-            <button className="ap-btn-launch" onClick={launchManual}>
-              Lanzar
-            </button>
-          ) : (
-            <button className="ap-btn-stop" onClick={handleStop}>
-              Detener
-            </button>
-          )}
+          <div className="ap-field ap-field-action">
+            {!running ? (
+              <button className="ap-btn-launch" onClick={launchManual}>
+                Iniciar
+              </button>
+            ) : (
+              <button className="ap-btn-stop" onClick={handleStop}>
+                Detener
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -338,7 +342,7 @@ export default function AutopilotPanel({ onLoadingChange }) {
         </div>
       )}
 
-      {/* ── Cuerpo principal: transcript + trace ── */}
+      {/* ── Cuerpo principal ── */}
       {hasStarted && (
       <div className="ap-body">
 
@@ -403,52 +407,11 @@ export default function AutopilotPanel({ onLoadingChange }) {
           </div>
         </div>
 
-        {/* ── Panel derecho: Radar + Trace ── */}
-        <div className="ap-trace" ref={traceRef}>
-          <div className="ap-trace-radar">
-            <RadarChart data={riskProfile} />
-          </div>
-          <div className="ap-trace-title">Traza del agente SR</div>
-          <div className="ap-trace-legend">
-            <span><span className="ap-trace-dot dot-think" />Razonando</span>
-            <span><span className="ap-trace-dot dot-tool" />Tool call</span>
-            <span><span className="ap-trace-dot dot-result" />Resultado</span>
-            <span><span className="ap-trace-dot dot-response" />Respuesta</span>
-          </div>
-          {traceEvents.length === 0 && running && (
-            <div className="ap-trace-empty">Esperando eventos...</div>
-          )}
-          {[...traceEvents].filter(ev => {
-              if (ev.event === "tool_call" && !ev.tool) return false
-              if (ev.event === "tool_result" && !ev.tool) return false
-              return true
-            }).reverse().map((ev, i, arr) => {
-            const isLast = i === arr.length - 1
-            let dotClass = "", label = "", sub = ""
-            if (ev.event === "thinking") {
-              dotClass = "dot-think"; label = "Razonando"
-            } else if (ev.event === "tool_call") {
-              dotClass = "dot-tool"; label = ev.tool
-              sub = ev.args && Object.keys(ev.args).length > 0
-                ? Object.values(ev.args).join(", ") : ""
-            } else if (ev.event === "tool_result") {
-              dotClass = "dot-result"; label = `↳ ${ev.tool}`
-              sub = ev.preview
-            } else if (ev.event === "agent_response") {
-              dotClass = "dot-response"; label = "Respuesta SR"
-              sub = `${ev.chars} chars`
-            }
-            return (
-              <div key={i} className={`ap-trace-row${isLast ? " ap-trace-last" : ""}`}>
-                <div className="ap-trace-graph">
-                  <div className={`ap-trace-dot ${dotClass}`} />
-                </div>
-                <span className="ap-trace-turno-tag">{ev.turno}</span>
-                {ev.delta != null && <span className="ap-trace-delta">+{ev.delta}ms</span>}
-                <span className="ap-trace-main">{label}</span>
-                {sub && <span className="ap-trace-sub">{sub}</span>}
-              </div>
-            )})}
+        {/* ── Panel derecho: Radar ── */}
+        <div className="ap-radar-panel">
+          <RadarChart data={riskProfile} />
+          <RetentionGauge value={retention} />
+          <SentimentLine points={sentimentPts} />
         </div>
 
       </div>
@@ -481,7 +444,6 @@ export default function AutopilotPanel({ onLoadingChange }) {
             setCaso(null)
             setTurns([])
             setAgentBuf("")
-            setTrace([])
           }}
         />
       )}

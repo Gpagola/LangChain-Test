@@ -30,22 +30,46 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "Alliance No.1";
+  src: url("./fonts/Alliance No.1 Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Alliance No.1";
+  src: url("./fonts/Alliance No.1 Medium.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Alliance No.1";
+  src: url("./fonts/Alliance No.1 SemiBold.otf") format("opentype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ── Tema oscuro (default) ── */
 :root {
-  --bg-app:      #101010;
-  --bg-panel:    #161616;
-  --bg-input:    #1e1e1e;
-  --bg-hover:    #252525;
-  --bg-active:   #2a2a2a;
-  --bg-textarea: #121212;
-  --bg-chat:     #101010;
-  --border:      #2a2a2a;
-  --border-focus:#444;
+  --bg-app:      #141414;
+  --bg-panel:    #1c1c1c;
+  --bg-input:    #2a2a2a;
+  --bg-hover:    #333333;
+  --bg-active:   #3a3a3a;
+  --bg-textarea: #181818;
+  --bg-chat:     #141414;
+  --border:      #3a3a3a;
+  --border-focus:#555;
   --text:        #f0f0f0;
-  --text-muted:  #888;
-  --text-faint:  #555;
+  --text-muted:  #999;
+  --text-faint:  #666;
   --btn-bg:      #f0f0f0;
   --btn-text:    #101010;
   --avatar-bg:   #f0f0f0;
@@ -79,7 +103,7 @@
 }
 
 body {
-  font-family: "Alliance No.2", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Alliance No.1", "Alliance No.2", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg-app);
   color: var(--text);
   height: 100vh;

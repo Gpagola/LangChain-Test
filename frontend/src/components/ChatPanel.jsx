@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react"
 import ReactMarkdown from "react-markdown"
 import { EvaluationModal } from "./EvaluationCard"
 import RadarChart from "./RadarChart"
+import RetentionGauge from "./RetentionGauge"
+import SentimentLine from "./SentimentLine"
 import "./ChatPanel.css"
 
 const API = import.meta.env.VITE_API_URL || "/api"
@@ -24,6 +26,8 @@ export default function ChatPanel({ onLoadingChange, onNewCase, showEval = false
   const [ended, setEnded]               = useState(false)
   const [showOptPrompt, setShowOptPrompt] = useState(false)
   const [riskProfile, setRiskProfile]     = useState(null)
+  const [retention, setRetention]         = useState(null)
+  const [sentimentPts, setSentimentPts]   = useState([])
   const bottomRef    = useRef(null)
   const textareaRef  = useRef(null)
   const abortRef     = useRef(null)
@@ -198,7 +202,11 @@ export default function ChatPanel({ onLoadingChange, onNewCase, showEval = false
             return msgs
           })
         }
-      }, setAgentStatus, setPoliza, (s) => setSuggestions(s), undefined, setRiskProfile)
+      }, setAgentStatus, setPoliza, (s) => setSuggestions(s), undefined, (profile) => {
+        setRiskProfile(profile)
+        if (profile.retencion != null) setRetention(profile.retencion)
+        if (profile.sentimiento != null) setSentimentPts(prev => [...prev, profile.sentimiento])
+      })
     } catch (e) {
       if (e.name !== "AbortError")
         setMessages(prev => [...prev, { role: "assistant", content: `⚠️ Error: ${e.message}` }])
@@ -241,25 +249,31 @@ export default function ChatPanel({ onLoadingChange, onNewCase, showEval = false
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
+  function formatAssistantMsg(text) {
+    // Convertir texto entre comillas largas (lo que el ejecutivo debe leer) en blockquote
+    return text.replace(/"([^"]{40,})"/g, (_, quoted) => {
+      return '\n\n> 💬 *' + quoted.trim() + '*\n\n'
+    })
+  }
+
   return (
     <div className="chat-panel">
       <div className="chat-main">
 
-      <div className="messages">
-        {/* Barra de contexto — aparece solo cuando hay póliza cargada */}
-        {poliza && (
-          <div className="session-bar">
+      {/* Barra de contexto — siempre visible, se llena al cargar póliza */}
+      <div className="session-bar">
+        {poliza ? (<>
+          <span className="session-item">
+            <span className="session-label">Póliza</span>
+            <span className="session-value">{poliza.numero}</span>
+          </span>
+          {poliza.cliente && (<>
+            <span className="session-sep">·</span>
             <span className="session-item">
-              <span className="session-label">Póliza</span>
-              <span className="session-value">{poliza.numero}</span>
+              <span className="session-label">Cliente</span>
+              <span className="session-value">{poliza.cliente}</span>
             </span>
-            {poliza.cliente && (<>
-              <span className="session-sep">·</span>
-              <span className="session-item">
-                <span className="session-label">Cliente</span>
-                <span className="session-value">{poliza.cliente}</span>
-              </span>
-            </>)}
+          </>)}
           <span className="session-sep">·</span>
           <span className="session-item">
             <span className="session-label">Ramo</span>
@@ -300,15 +314,18 @@ export default function ChatPanel({ onLoadingChange, onNewCase, showEval = false
               </span>
             </span>
           </>)}
-        </div>
-      )}
+        </>) : (
+          <span className="session-empty">Sin póliza cargada</span>
+        )}
+      </div>
 
+      <div className="messages">
         {messages.map((msg, i) => (
           <div key={i} className={`message-row ${msg.role}`}>
             {msg.role === "assistant" && <div className="avatar">SR</div>}
             <div className="bubble">
               {msg.role === "assistant"
-                ? <ReactMarkdown>{msg.content}</ReactMarkdown>
+                ? <ReactMarkdown>{formatAssistantMsg(msg.content)}</ReactMarkdown>
                 : <span>{msg.content}</span>
               }
             </div>
@@ -429,10 +446,14 @@ export default function ChatPanel({ onLoadingChange, onNewCase, showEval = false
 
       </div>{/* close chat-main */}
 
-      {/* ── Radar de riesgo ── */}
-      <div className="chat-radar-sidebar">
-        <RadarChart data={riskProfile} />
-      </div>
+      {/* ── Radar de riesgo (solo en modo test) ── */}
+      {showEval && (
+        <div className="chat-radar-sidebar">
+          <RadarChart data={riskProfile} />
+          <RetentionGauge value={retention} />
+          <SentimentLine points={sentimentPts} />
+        </div>
+      )}
 
       {/* ── Prompt optimizador ── */}
       {showOptPrompt && (

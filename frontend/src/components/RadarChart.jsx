@@ -2,12 +2,12 @@ import { useState, useEffect, useRef } from "react"
 import "./RadarChart.css"
 
 const DIMS = [
-  { key: "precio",      label: "Precio" },
   { key: "competencia", label: "Competencia" },
   { key: "experiencia", label: "Experiencia" },
   { key: "valor",       label: "Valor" },
-  { key: "situacion",   label: "Situación" },
   { key: "vinculacion", label: "Vinculación" },
+  { key: "situacion",   label: "Situación" },
+  { key: "precio",      label: "Precio" },
 ]
 
 const N = DIMS.length
@@ -28,7 +28,7 @@ function hexPts(radius) {
 
 const LABEL_POS = DIMS.map((_, i) => {
   const a = (Math.PI * 2 / N) * i - Math.PI / 2
-  const d = R + 24
+  const d = R + 14
   const x = CX + d * Math.cos(a)
   const y = CY + d * Math.sin(a)
   const anchor = (i === 1 || i === 2) ? "start" : (i === 4 || i === 5) ? "end" : "middle"
@@ -70,7 +70,7 @@ export default function RadarChart({ data }) {
   return (
     <div className="radar-chart">
       <div className="radar-header">
-        <span className="radar-title">Perfil de riesgo</span>
+        <span className="radar-title">Motivos de baja</span>
         {!hasData && <span className="radar-waiting">Esperando conversación</span>}
       </div>
       <svg viewBox="0 0 300 300" className="radar-svg">
@@ -102,26 +102,6 @@ export default function RadarChart({ data }) {
           )
         })}
       </svg>
-      {/* Legend values */}
-      {hasData && (
-        <div className="radar-legend">
-          {DIMS.map(d => {
-            const val = Math.round(anim[d.key] || 0)
-            return (
-              <div key={d.key} className="radar-legend-row">
-                <span className="radar-legend-label">{d.label}</span>
-                <div className="radar-legend-bar-track">
-                  <div
-                    className={`radar-legend-bar-fill ${val > 60 ? "high" : val > 30 ? "mid" : ""}`}
-                    style={{ width: `${val}%` }}
-                  />
-                </div>
-                <span className="radar-legend-val">{val}</span>
-              </div>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }
